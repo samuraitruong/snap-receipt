@@ -61,10 +61,25 @@ export async function extractTextWithGoogleVision(base64Image: string): Promise<
 
 
 /**
- * Format receipt text using Google Generative AI
- * Takes raw OCR text and formats it nicely with products and modifiers
+ * Receipt data structure returned by AI
  */
-export async function formatReceiptWithGenerativeAI(rawText: string): Promise<string> {
+export interface ReceiptItem {
+  name: string;
+  quantity: number;
+  price: number; // Price as a number (without $ sign)
+  modifiers?: string[]; // Optional array of modifier strings
+}
+
+export interface ReceiptData {
+  items: ReceiptItem[];
+  total: number; // Total price (GST inclusive)
+}
+
+/**
+ * Format receipt text using Google Generative AI
+ * Takes raw OCR text and returns structured JSON data
+ */
+export async function formatReceiptWithGenerativeAI(rawText: string): Promise<ReceiptData> {
   if (!GOOGLE_AI_KEY || GOOGLE_AI_KEY === '') {
     throw new Error('Google AI key not configured. Please set EXPO_PUBLIC_GOOGLE_AI_KEY');
   }
@@ -76,73 +91,89 @@ export async function formatReceiptWithGenerativeAI(rawText: string): Promise<st
   try {
     console.log('Formatting receipt with Generative AI, model:', MODEL_ID);
     console.log('Raw text length:', rawText.length);
-    const prompt = `You are a receipt formatting assistant. Format the following receipt text into a clean, readable format with proper alignment.
+    const prompt = `You are a receipt parsing assistant. Extract structured data from the following receipt text and return it as JSON.
 
-CRITICAL FORMATTING RULES:
-1. Store Information: DO NOT include store name, address, date, or time - these will be added by the app. Start directly with product items.
+CRITICAL EXTRACTION RULES:
+1. Store Information: DO NOT include store name, address, date, or time - ignore these completely.
 
 2. Total Identification:
    - The "Total" label and amount appears at the TOP of the receipt (before product items)
-   - This Total line is NOT a product item - it is a summary line
-   - DO NOT include the Total line as a product item
-   - Identify this Total amount and use it ONLY for calculating Subtotal and GST
-   - Skip the Total line and start listing actual product items
+   - This Total line is NOT a product item - it is a summary line with the final total price
+   - CRITICAL: Identify and extract the Total amount from the top of the receipt
+   - This Total price already INCLUDES GST (10% GST is included in the total)
+   - Extract the numeric value of the total (e.g., if you see "$110.00" or "Total: $110.00", extract 110.00)
 
-3. Product Items - Basic Format:
-   - Each product/item on its own line
-   - ALWAYS extract and display quantity if present (e.g., "1x", "2x", "3x" before the product name)
-   - Format: "1x PRODUCT NAME" or "2x PRODUCT NAME" or "3x PRODUCT NAME"
-   - Product name with quantity on the LEFT
-   - Price on the RIGHT (aligned to the right side)
-   - Use consistent spacing (at least 20-30 spaces between name and price)
-   - Prices should ONLY appear on the main product line, NEVER on modifier lines
-
-4. Product Items - Multiple Items with Same Name:
+3. Product Items:
+   - Extract each product/item as a separate entry
+   - ALWAYS extract quantity if present (e.g., "1x", "2x", "3x" before the product name)
+   - If no quantity is shown, assume quantity is 1
+   - Extract the product name (without quantity prefix)
+   - Extract the price as a numeric value (without $ sign, e.g., "10.99" not "$10.99")
    - If the same product name appears multiple times with different modifiers or prices, each is a SEPARATE item
-   - List each occurrence separately with its own quantity and price
    - Example: If you see "Burger" with "no onions" and "$10.00", and "Burger" with "extra cheese" and "$12.00", list them as two separate items
 
-5. Modifiers:
-   - If a product has modifiers (like "no onions", "extra cheese", "add bacon"), list them as indented sub-items using 2 spaces
+4. Modifiers:
+   - If a product has modifiers (like "no onions", "extra cheese", "add bacon"), extract them as an array
    - Modifiers should be text-only (no prices, no dollar amounts)
-   - The price belongs to the main product line above the modifiers, NOT to individual modifiers
-   - Each modifier on its own line, indented under the product
-6. Summary Section:
-   - The TOTAL price already includes GST (10% inclusive)
-   - Calculate Subtotal and GST from the Total amount found at the top of the receipt
-   - Formula: Subtotal = Total × (100/110), GST = Total × (10/110)
-   - Example: If Total is $110.00, then Subtotal = $100.00 and GST = $10.00
-   - Display Subtotal and GST at the bottom (label left, amount right)
-   - Use "GST" label, NOT "Tax"
-   - DO NOT display "Total" or "TOTAL" at the bottom - only show Subtotal and GST
+   - The price belongs to the main product, NOT to individual modifiers
+   - If a product has no modifiers, omit the modifiers field or set it to an empty array
 
-7. Return ONLY the formatted receipt text, no explanations or comments
+5. Return Format:
+   - Return ONLY valid JSON, no explanations or comments
+   - Use this exact structure:
+     {
+       "items": [
+         {
+           "name": "Product Name",
+           "quantity": 1,
+           "price": 10.99,
+           "modifiers": ["No onions", "Extra cheese"]
+         }
+       ],
+       "total": 110.00
+     }
+   - All prices should be numbers (not strings)
+   - All quantities should be numbers (not strings)
+   - Product names should be strings
+   - Modifiers should be an array of strings (or omit if empty)
 
-Example format:
-1x BURGER                        $10.99
-  - No onions
-  - Extra cheese
-
-2x BURGER                        $12.50
-  - Add bacon
-  - Extra cheese
-
-3x FRIES                         $15.50
-
-Subtotal:                      $90.91
-GST:                            $9.09
+Example JSON output:
+{
+  "items": [
+    {
+      "name": "BURGER",
+      "quantity": 1,
+      "price": 10.99,
+      "modifiers": ["No onions", "Extra cheese"]
+    },
+    {
+      "name": "BURGER",
+      "quantity": 2,
+      "price": 12.50,
+      "modifiers": ["Add bacon", "Extra cheese"]
+    },
+    {
+      "name": "FRIES",
+      "quantity": 3,
+      "price": 15.50
+    }
+  ],
+  "total": 110.00
+}
 
 KEY POINTS:
-- ALWAYS include quantity (1x, 2x, 3x, etc.) before product names
-- If the same product appears multiple times with different modifiers or prices, list each separately
-- The Total line at the top is NOT a product - skip it and use it only for calculation
-- Prices go on the main product line, NOT on modifier lines
-- Modifiers are indented text-only lines below the product
+- Extract the Total from the TOP of the receipt (it's the final total price)
+- The Total already includes GST (10% inclusive)
+- Extract quantity as a number (1 if not shown)
+- Extract price as a number without $ sign
+- If a product has no modifiers, you can omit the modifiers field
+- Each product with different modifiers or price is a separate item
+- Return ONLY the JSON, no other text
 
 Raw receipt text:
 ${rawText}
 
-Formatted receipt:`;
+JSON response:`;
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_AI_KEY}`,
@@ -197,17 +228,61 @@ Formatted receipt:`;
       throw new Error(`Google AI API error: ${JSON.stringify(data.error)}`);
     }
 
-    const formattedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
-    if (!formattedText) {
+    if (!aiResponseText) {
       // Check if there's an error in the response
       if (data.candidates?.[0]?.finishReason === 'SAFETY' || data.candidates?.[0]?.finishReason === 'RECITATION') {
         throw new Error(`Content blocked by safety filter (finishReason: ${data.candidates[0].finishReason})`);
       }
-      throw new Error('No formatted text returned from AI. Response: ' + JSON.stringify(data));
+      throw new Error('No response text returned from AI. Response: ' + JSON.stringify(data));
     }
 
-    return formattedText.trim();
+    // Parse the JSON response
+    let receiptData: ReceiptData;
+    try {
+      // Clean the response text - remove any markdown code blocks if present
+      let cleanedText = aiResponseText.trim();
+      // Remove markdown code blocks if present
+      if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      }
+      
+      receiptData = JSON.parse(cleanedText);
+      
+      // Validate the structure
+      if (!receiptData || typeof receiptData !== 'object') {
+        throw new Error('Invalid JSON structure: root is not an object');
+      }
+      if (!Array.isArray(receiptData.items)) {
+        throw new Error('Invalid JSON structure: items is not an array');
+      }
+      if (typeof receiptData.total !== 'number') {
+        throw new Error('Invalid JSON structure: total is not a number');
+      }
+      
+      // Validate items
+      receiptData.items.forEach((item, index) => {
+        if (!item.name || typeof item.name !== 'string') {
+          throw new Error(`Invalid item at index ${index}: name is missing or not a string`);
+        }
+        if (typeof item.quantity !== 'number' || item.quantity < 1) {
+          throw new Error(`Invalid item at index ${index}: quantity is missing or invalid`);
+        }
+        if (typeof item.price !== 'number' || item.price < 0) {
+          throw new Error(`Invalid item at index ${index}: price is missing or invalid`);
+        }
+        if (item.modifiers && !Array.isArray(item.modifiers)) {
+          throw new Error(`Invalid item at index ${index}: modifiers is not an array`);
+        }
+      });
+      
+    } catch (parseError) {
+      console.error('Failed to parse AI JSON response:', aiResponseText);
+      throw new Error(`Failed to parse JSON response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+    }
+
+    return receiptData;
   } catch (error) {
     console.error('Google Generative AI Error:', error);
     throw error;
@@ -218,7 +293,7 @@ Formatted receipt:`;
  * Extract and format text using Google Generative AI (Vision + Formatting)
  * This uses Vision API to extract text, then Generative AI to format it
  */
-export async function extractAndFormatWithGenerativeAI(base64Image: string): Promise<string> {
+export async function extractAndFormatWithGenerativeAI(base64Image: string): Promise<ReceiptData> {
   // First extract text using Vision API
   if (!GOOGLE_VISION_API_KEY || GOOGLE_VISION_API_KEY === '') {
     throw new Error('Google Vision API key not configured. Please set EXPO_PUBLIC_GOOGLE_VISION_API_KEY');
@@ -270,11 +345,12 @@ export async function extractTextFromImage(base64Image: string): Promise<string>
 
 /**
  * Extract text with mode selection
+ * Returns ReceiptData for 'generative' mode, or raw text string for 'vision' mode
  */
 export async function extractTextFromImageWithMode(
   base64Image: string, 
   mode: 'vision' | 'generative'
-): Promise<string> {
+): Promise<string | ReceiptData> {
   if (mode === 'generative') {
     return await extractAndFormatWithGenerativeAI(base64Image);
   } else {

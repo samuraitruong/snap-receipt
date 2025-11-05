@@ -2,13 +2,13 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { extractTextFromImageWithMode } from '@/utils/ocr';
-import { getNextOrderNumber, getCurrentOrderNumber } from '@/utils/orderNumber';
+import { getCurrentOrderNumber, getNextOrderNumber } from '@/utils/orderNumber';
 import { getOCRMode } from '@/utils/settings';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
-import { useRef, useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
@@ -118,7 +118,7 @@ export default function CaptureScreen() {
       console.log('Using OCR mode:', ocrMode);
 
       // Extract text using the selected OCR mode
-      const extractedText = await extractTextFromImageWithMode(base64Image, ocrMode);
+      const extractedData = await extractTextFromImageWithMode(base64Image, ocrMode);
 
           // Get the next order number for this receipt
           const orderNumber = await getNextOrderNumber();
@@ -126,12 +126,18 @@ export default function CaptureScreen() {
           // Update the current order number display
           setCurrentOrderNumber(orderNumber);
 
-          // Navigate to receipt view with extracted text and order number
+          // Navigate to receipt view with extracted data
+          // For generative mode, pass JSON string; for vision mode, pass text string
+          const extractedDataString = typeof extractedData === 'string' 
+            ? extractedData 
+            : JSON.stringify(extractedData);
+          
           router.push({
             pathname: '/receipt',
             params: {
               imageUri: imageUri ? encodeURIComponent(imageUri) : '',
-              extractedText: encodeURIComponent(extractedText || 'No text extracted'),
+              extractedText: encodeURIComponent(extractedDataString || 'No text extracted'),
+              extractedDataType: ocrMode === 'generative' ? 'json' : 'text',
               orderNumber: orderNumber.toString(),
             },
           });
