@@ -7,7 +7,8 @@ import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ReceiptScreen() {
   const params = useLocalSearchParams();
@@ -18,6 +19,7 @@ export default function ReceiptScreen() {
   const orderNumber = params.orderNumber ? params.orderNumber as string : null;
   const [isPrinting, setIsPrinting] = useState(false);
   const [showImage, setShowImage] = useState(false);
+  const insets = useSafeAreaInsets();
 
   // Theme colors for dark mode support
   const backgroundColor = useThemeColor({}, 'background');
@@ -510,8 +512,19 @@ export default function ReceiptScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <View style={[styles.header, { backgroundColor, borderBottomColor: borderColor }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { backgroundColor: tintColor + '20' }]}>
+      <View style={[
+        styles.header, 
+        { 
+          backgroundColor, 
+          borderBottomColor: borderColor,
+          paddingTop: Platform.OS === 'android' ? Math.max(insets.top, 16) : 60,
+        }
+      ]}>
+        <TouchableOpacity 
+          onPress={() => router.back()} 
+          style={[styles.backButton, { backgroundColor: tintColor + '20' }]}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <IconSymbol name="chevron.left" size={24} color={tintColor} />
         </TouchableOpacity>
         <ThemedText type="title" style={styles.title}>Receipt</ThemedText>
@@ -519,6 +532,7 @@ export default function ReceiptScreen() {
           onPress={handlePrint} 
           style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
           disabled={isPrinting}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <IconSymbol 
             name="printer.fill" 
@@ -749,9 +763,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 60,
     paddingBottom: 16,
     borderBottomWidth: 1,
+    minHeight: 56,
   },
   backButton: {
     width: 40,
@@ -759,6 +773,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   title: {
     fontSize: 20,
@@ -770,6 +785,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   scrollView: {
     flex: 1,

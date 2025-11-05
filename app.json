@@ -1,12 +1,14 @@
 {
   "expo": {
-    "name": "snap-receipt",
+    "name": "Snap Receipt",
     "slug": "snap-receipt",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "snapreceipt",
     "userInterfaceStyle": "automatic",
+    "description": "Capture and digitize receipts instantly with AI-powered OCR technology. Extract purchase details, calculate totals, and manage receipts with ease.",
+    "sdkVersion": "54.0.0",
     "newArchEnabled": true,
     "web": {
       "output": "static",
@@ -43,15 +45,20 @@
     ],
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.snapreceipt.app",
+      "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs access to your camera to capture receipt photos.",
-        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select receipt images."
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select receipt images.",
+        "CFBundleDisplayName": "Snap Receipt",
+        "CFBundleName": "Snap Receipt"
       }
     },
     "android": {
       "package": "com.snapreceipt.app",
+      "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0A7EA4",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
