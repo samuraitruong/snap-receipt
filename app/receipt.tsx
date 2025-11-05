@@ -576,7 +576,7 @@ export default function ReceiptScreen() {
           <View style={styles.shopInfoSection}>
             <ThemedText type="subtitle" style={styles.shopName}>Pappa's Ocean Catch</ThemedText>
             {orderNumber && (
-              <ThemedText style={[styles.orderNumber, { color: tertiaryText }]}>Order #: {orderNumber}</ThemedText>
+              <ThemedText style={[styles.orderNumber, { color: tertiaryText }]}>Order: #{orderNumber}</ThemedText>
             )}
             <ThemedText style={[styles.dateTime, { color: secondaryText }]}>
               {(() => {
