@@ -2,11 +2,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { getReceiptsByDate, getAllReceipts, getAvailableDates, type ReceiptRecord } from '@/utils/database';
-import { initDatabase } from '@/utils/database';
+import { getAvailableDates, getReceiptsByDate, initDatabase, type ReceiptRecord } from '@/utils/database';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Lazy require DateTimePicker to avoid dependency issues if not installed
@@ -130,6 +129,49 @@ export default function OrdersScreen() {
     }
   };
 
+  const formatCompactDate = (dateStr: string): string => {
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const getPreviousDate = (): string | null => {
+    if (!selectedDate || availableDates.length === 0) return null;
+    const currentIndex = availableDates.indexOf(selectedDate);
+    if (currentIndex > 0) {
+      return availableDates[currentIndex - 1];
+    }
+    return null;
+  };
+
+  const getNextDate = (): string | null => {
+    if (!selectedDate || availableDates.length === 0) return null;
+    const currentIndex = availableDates.indexOf(selectedDate);
+    if (currentIndex < availableDates.length - 1) {
+      return availableDates[currentIndex + 1];
+    }
+    return null;
+  };
+
+  const handlePreviousDate = () => {
+    const prevDate = getPreviousDate();
+    if (prevDate) {
+      setSelectedDate(prevDate);
+    }
+  };
+
+  const handleNextDate = () => {
+    const nextDate = getNextDate();
+    if (nextDate) {
+      setSelectedDate(nextDate);
+    }
+  };
+
+  const totalNetSales = receipts.reduce((sum, receipt) => sum + receipt.total_price, 0);
+
   return (
     <ThemedView style={styles.container}>
       <View style={[
@@ -152,43 +194,74 @@ export default function OrdersScreen() {
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        {/* Date Selector */}
+        {/* Compact Date Selector */}
         <View style={[styles.dateSelector, { backgroundColor: cardBackground, borderColor }]}>
-          <View style={styles.dateHeader}>
-            <ThemedText style={styles.dateLabel}>Select Date</ThemedText>
-            <TouchableOpacity onPress={openDatePicker} style={[styles.calendarButton, { backgroundColor: tintColor + '20' }]}>
-              <IconSymbol name="calendar" size={20} color={tintColor} />
-            </TouchableOpacity>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateScroll}>
-            {availableDates.map((date) => (
-              <TouchableOpacity
-                key={date}
-                onPress={() => handleDateSelect(date)}
-                style={[
-                  styles.dateButton,
-                  selectedDate === date && { backgroundColor: tintColor },
-                ]}
-              >
-                <ThemedText style={[
-                  styles.dateButtonText,
-                  selectedDate === date && { color: '#fff' },
-                ]}>
-                  {formatDate(date)}
-                </ThemedText>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-          {showDatePicker && DateTimePicker && (
-            <DateTimePicker
-              value={datePickerValue}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={handleDatePickerChange}
-              maximumDate={new Date()}
+          <TouchableOpacity
+            onPress={handlePreviousDate}
+            disabled={!getPreviousDate()}
+            style={[
+              styles.navButton,
+              { backgroundColor: tintColor + '15' },
+              !getPreviousDate() && styles.navButtonDisabled
+            ]}
+          >
+            <IconSymbol 
+              name="chevron.left" 
+              size={18} 
+              color={getPreviousDate() ? tintColor : secondaryText} 
             />
-          )}
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={openDatePicker}
+            style={styles.dateDisplay}
+            activeOpacity={0.7}
+          >
+            <ThemedText style={styles.dateDisplayText}>{formatCompactDate(selectedDate)}</ThemedText>
+            <IconSymbol name="calendar" size={16} color={tintColor} />
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            onPress={handleNextDate}
+            disabled={!getNextDate()}
+            style={[
+              styles.navButton,
+              { backgroundColor: tintColor + '15' },
+              !getNextDate() && styles.navButtonDisabled
+            ]}
+          >
+            <IconSymbol 
+              name="chevron.right" 
+              size={18} 
+              color={getNextDate() ? tintColor : secondaryText} 
+            />
+          </TouchableOpacity>
         </View>
+
+        {showDatePicker && DateTimePicker && (
+          <DateTimePicker
+            value={datePickerValue}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            onChange={handleDatePickerChange}
+            maximumDate={new Date()}
+          />
+        )}
+
+        {/* Total Net Sales */}
+        {receipts.length > 0 && (
+          <View style={[styles.statsCard, { backgroundColor: cardBackground, borderColor }]}>
+            <View style={styles.statsRow}>
+              <ThemedText style={styles.statsLabel}>Total Net Sales</ThemedText>
+              <ThemedText style={[styles.statsValue, { color: tintColor }]}>
+                ${totalNetSales.toFixed(2)}
+              </ThemedText>
+            </View>
+            <ThemedText style={[styles.statsSubtext, { color: secondaryText }]}>
+              {receipts.length} {receipts.length === 1 ? 'order' : 'orders'}
+            </ThemedText>
+          </View>
+        )}
 
         {/* Receipts List */}
         {loading ? (
@@ -262,41 +335,61 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   dateSelector: {
-    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 8,
-  },
-  dateHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     marginBottom: 12,
+    gap: 12,
   },
-  dateLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  calendarButton: {
+  navButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dateScroll: {
+  navButtonDisabled: {
+    opacity: 0.4,
+  },
+  dateDisplay: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-  },
-  dateButton: {
-    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(10, 126, 164, 0.1)',
-    marginRight: 8,
   },
-  dateButtonText: {
-    fontSize: 14,
+  dateDisplayText: {
+    fontSize: 15,
     fontWeight: '600',
+  },
+  statsCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  statsLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  statsValue: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  statsSubtext: {
+    fontSize: 12,
+    marginTop: 2,
   },
   receiptsList: {
     gap: 12,
