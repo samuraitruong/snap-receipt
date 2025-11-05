@@ -93,7 +93,12 @@ export async function formatReceiptWithGenerativeAI(rawText: string): Promise<Re
     console.log('Raw text length:', rawText.length);
     const prompt = `You are a receipt parsing assistant. Extract structured data from the following receipt text and return it as JSON.
 
-CRITICAL EXTRACTION RULES:
+CRITICAL EXTRACTION RULES - STRICT PARSING ONLY:
+- ONLY extract information that is EXPLICITLY visible in the receipt text
+- DO NOT add, infer, or assume any information that is not in the receipt
+- DO NOT modify items or add modifiers that are not visible
+- Parse exactly what you see, nothing more, nothing less
+
 1. Store Information: DO NOT include store name, address, date, or time - ignore these completely.
 
 2. Total Identification:
@@ -107,16 +112,23 @@ CRITICAL EXTRACTION RULES:
    - Extract each product/item as a separate entry
    - ALWAYS extract quantity if present (e.g., "1x", "2x", "3x" before the product name)
    - If no quantity is shown, assume quantity is 1
-   - Extract the product name (without quantity prefix)
+   - Extract the product name EXACTLY as it appears in the receipt (without quantity prefix)
+   - DO NOT modify product names or add information that is not visible
    - Extract the price as a numeric value (without $ sign, e.g., "10.99" not "$10.99")
    - If the same product name appears multiple times with different modifiers or prices, each is a SEPARATE item
    - Example: If you see "Burger" with "no onions" and "$10.00", and "Burger" with "extra cheese" and "$12.00", list them as two separate items
+   - IMPORTANT: Only extract what you see - do not add or modify anything
 
-4. Modifiers:
-   - If a product has modifiers (like "no onions", "extra cheese", "add bacon"), extract them as an array
+4. Modifiers - CRITICAL RULES:
+   - ONLY extract modifiers that are EXPLICITLY visible in the receipt image
+   - DO NOT add modifiers that are not visible in the receipt
+   - DO NOT infer or assume modifiers based on product names
+   - DO NOT add modifiers just because a product might commonly have them
+   - If a product has modifiers visible in the receipt (like "no onions", "extra cheese", "add bacon"), extract them as an array
    - Modifiers should be text-only (no prices, no dollar amounts)
    - The price belongs to the main product, NOT to individual modifiers
-   - If a product has no modifiers, omit the modifiers field or set it to an empty array
+   - If a product has NO modifiers visible in the receipt image, you MUST omit the modifiers field completely (do not include an empty array)
+   - Only include modifiers if they are clearly written/printed on the receipt
 
 5. Return Format:
    - Return ONLY valid JSON, no explanations or comments
@@ -137,7 +149,7 @@ CRITICAL EXTRACTION RULES:
    - Product names should be strings
    - Modifiers should be an array of strings (or omit if empty)
 
-Example JSON output:
+Example JSON output (only include modifiers if they are visible in the receipt):
 {
   "items": [
     {
@@ -161,14 +173,19 @@ Example JSON output:
   "total": 110.00
 }
 
+Note: In the example above, modifiers are only shown IF they are visible in the receipt. If FRIES had no modifiers visible, do not add any modifiers field for it.
+
 KEY POINTS:
 - Extract the Total from the TOP of the receipt (it's the final total price)
 - The Total already includes GST (10% inclusive)
 - Extract quantity as a number (1 if not shown)
 - Extract price as a number without $ sign
-- If a product has no modifiers, you can omit the modifiers field
+- CRITICAL: Only extract modifiers that are ACTUALLY VISIBLE in the receipt image
+- DO NOT add modifiers that are not in the receipt - if you don't see them, don't include them
+- If a product has no visible modifiers, omit the modifiers field completely
 - Each product with different modifiers or price is a separate item
 - Return ONLY the JSON, no other text
+- Be strict: only parse what you see, don't add anything
 
 Raw receipt text:
 ${rawText}
