@@ -5,6 +5,7 @@ const SHOP_NAME_KEY = '@snap_receipt:shop_name';
 const PRINT_MARGIN_KEY = '@snap_receipt:print_margin_mm';
 const PRINT_TEMPLATE_KEY = '@snap_receipt:print_template';
 const AUTO_PRINTER_KEY = '@snap_receipt:auto_printer';
+const AUTO_SAVE_KEY = '@snap_receipt:auto_save';
 
 export type OCRMode = 'vision' | 'generative';
 export type PrintTemplateId = 'classic' | 'compact' | 'kitchen';
@@ -128,6 +129,30 @@ export async function setPrintTemplate(id: PrintTemplateId): Promise<void> {
     await AsyncStorage.setItem(PRINT_TEMPLATE_KEY, id);
   } catch (error) {
     console.error('Error setting print template:', error);
+  }
+}
+
+/**
+ * Get the Auto Save setting
+ */
+export async function getAutoSave(): Promise<boolean> {
+  try {
+    const value = await AsyncStorage.getItem(AUTO_SAVE_KEY);
+    return value === 'true'; // Default to false
+  } catch (error) {
+    console.error('Error getting auto save setting:', error);
+    return false;
+  }
+}
+
+/**
+ * Set the Auto Save setting
+ */
+export async function setAutoSave(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(AUTO_SAVE_KEY, enabled ? 'true' : 'false');
+  } catch (error) {
+    console.error('Error setting auto save setting:', error);
   }
 }
 

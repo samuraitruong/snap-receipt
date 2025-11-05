@@ -3,161 +3,129 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getAutoPrinter, getOCRMode, OCRMode, setAutoPrinter, setOCRMode } from '@/utils/settings';
-import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { getTodayReceipts, initDatabase, type ReceiptRecord } from '@/utils/database';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { useState, useCallback } from 'react';
+import { Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
-  const [ocrMode, setOcrMode] = useState<OCRMode>('vision');
-  const [autoPrinter, setAutoPrinterEnabled] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [showInstructions, setShowInstructions] = useState(false);
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [todayReceipts, setTodayReceipts] = useState<ReceiptRecord[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
+  const loadTodayReceipts = async () => {
     try {
-      const [mode, autoPrint] = await Promise.all([
-        getOCRMode(),
-        getAutoPrinter(),
-      ]);
-      setOcrMode(mode);
-      setAutoPrinterEnabled(autoPrint);
+      setLoading(true);
+      await initDatabase();
+      const receipts = await getTodayReceipts(5);
+      setTodayReceipts(receipts);
     } catch (error) {
-      console.error('Error loading settings:', error);
+      console.error('Error loading today receipts:', error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleModeChange = async (value: boolean) => {
-    const newMode: OCRMode = value ? 'generative' : 'vision';
-    setOcrMode(newMode);
-    await setOCRMode(newMode);
-  };
-
-  const handleAutoPrinterChange = async (value: boolean) => {
-    setAutoPrinterEnabled(value);
-    await setAutoPrinter(value);
-  };
+  // Load receipts when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadTodayReceipts();
+    }, [])
+  );
 
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.content}>
-        <View style={styles.iconContainer}>
-          <IconSymbol 
-            name="doc.text.fill" 
-            size={80} 
-            color={Colors[colorScheme ?? 'light'].tint} 
-          />
-        </View>
-        
-        <View style={styles.headerRow}>
+      <ScrollView 
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: Platform.OS === 'ios' ? Math.max(insets.top + 8, 24) : 24 }
+        ]}
+      >
+        <View style={styles.header}>
           <ThemedText type="title" style={styles.title}>
-            Snap Receipt
+            Today's Orders
           </ThemedText>
-          <Pressable style={styles.infoButton} onPress={() => setShowInstructions(true)}>
-            <IconSymbol name="info.circle" size={22} color={Colors[colorScheme ?? 'light'].tint} />
-          </Pressable>
-        </View>
-        
-        <ThemedText style={styles.description}>
-          Capture receipts and extract text automatically
-        </ThemedText>
-        
-        <View style={styles.settingsContainer}>
-          <ThemedText type="subtitle" style={styles.settingsTitle}>
-            Settings
-          </ThemedText>
-          
-          {/* OCR Mode Setting */}
-          <View style={styles.settingRow}>
-            <View style={styles.settingInfo}>
-              <IconSymbol 
-                name={ocrMode === 'vision' ? 'text.viewfinder' : 'sparkles'} 
-                size={20} 
-                color={Colors[colorScheme ?? 'light'].tint} 
-              />
-              <View style={styles.settingText}>
-                <ThemedText style={styles.settingLabel}>
-                  {ocrMode === 'vision' ? 'Vision AI' : 'Generative AI'}
-                </ThemedText>
-                <ThemedText style={styles.settingDescription}>
-                  {ocrMode === 'vision' 
-                    ? 'Fast text extraction using Vision API'
-                    : 'AI-powered formatting with product modifiers'}
-                </ThemedText>
-              </View>
-            </View>
-            <Switch
-              value={ocrMode === 'generative'}
-              onValueChange={handleModeChange}
-              trackColor={{ false: '#767577', true: Colors[colorScheme ?? 'light'].tint }}
-              thumbColor={ocrMode === 'generative' ? '#fff' : '#f4f3f4'}
-            />
-          </View>
-
-          {/* Auto Printer Setting */}
-          <View style={[styles.settingRow, styles.settingRowSeparator]}>
-            <View style={styles.settingInfo}>
-              <IconSymbol 
-                name="printer.fill" 
-                size={20} 
-                color={Colors[colorScheme ?? 'light'].tint} 
-              />
-              <View style={styles.settingText}>
-                <ThemedText style={styles.settingLabel}>
-                  Auto Printer
-                </ThemedText>
-                <ThemedText style={styles.settingDescription}>
-                  Automatically print receipts to connected thermal printer
-                </ThemedText>
-              </View>
-            </View>
-            <Switch
-              value={autoPrinter}
-              onValueChange={handleAutoPrinterChange}
-              trackColor={{ false: '#767577', true: Colors[colorScheme ?? 'light'].tint }}
-              thumbColor={autoPrinter ? '#fff' : '#f4f3f4'}
-            />
-          </View>
-        </View>
-
-        {/* Instructions Modal */}
-        <Modal visible={showInstructions} transparent animationType="fade" onRequestClose={() => setShowInstructions(false)}>
-          <View style={styles.modalBackdrop}>
-            <ThemedView style={styles.modalCard}>
-              <ThemedText type="subtitle" style={styles.instructionsTitle}>
-                How to use
+          {todayReceipts.length > 0 && (
+            <TouchableOpacity onPress={() => router.push('/orders')}>
+              <ThemedText style={[styles.viewAllText, { color: Colors[colorScheme ?? 'light'].tint }]}>
+                View All
               </ThemedText>
-              <View style={styles.step}>
-                <IconSymbol name="camera.fill" size={24} color={Colors[colorScheme ?? 'light'].tint} />
-                <ThemedText style={styles.stepText}>
-                  Go to the Capture tab to take a photo of your receipt
-                </ThemedText>
-              </View>
-              <View style={styles.step}>
-                <IconSymbol name="text.viewfinder" size={24} color={Colors[colorScheme ?? 'light'].tint} />
-                <ThemedText style={styles.stepText}>
-                  The app will extract text using {ocrMode === 'vision' ? 'Vision AI' : 'Generative AI'}
-                </ThemedText>
-              </View>
-              <View style={styles.step}>
-                <IconSymbol name="doc.text.fill" size={24} color={Colors[colorScheme ?? 'light'].tint} />
-                <ThemedText style={styles.stepText}>
-                  View your receipt in a formatted display
-                </ThemedText>
-              </View>
-              <Pressable style={styles.closeButton} onPress={() => setShowInstructions(false)}>
-                <ThemedText style={styles.closeButtonText}>Close</ThemedText>
-              </Pressable>
-            </ThemedView>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {loading ? (
+          <View style={styles.emptyContainer}>
+            <ThemedText style={styles.emptyText}>Loading orders...</ThemedText>
           </View>
-        </Modal>
-      </View>
+        ) : todayReceipts.length > 0 ? (
+          <View style={styles.ordersList}>
+            {todayReceipts.map((receipt) => (
+              <TouchableOpacity
+                key={receipt.id}
+                onPress={() => {
+                  try {
+                    const data = JSON.parse(receipt.receipt_data);
+                    router.push({
+                      pathname: '/receipt',
+                      params: {
+                        imageUri: '',
+                        extractedText: encodeURIComponent(data.extractedText || ''),
+                        extractedDataType: data.isJson ? 'json' : 'text',
+                        orderNumber: receipt.order_number || '',
+                        isExistingReceipt: 'true',
+                      },
+                    });
+                  } catch (e) {
+                    console.error('Error opening receipt:', e);
+                  }
+                }}
+                style={styles.orderCard}
+              >
+                <View style={styles.orderInfo}>
+                  <View style={styles.orderHeader}>
+                    <ThemedText style={styles.orderTotal}>${receipt.total_price.toFixed(2)}</ThemedText>
+                    <IconSymbol name="chevron.right" size={20} color={Colors[colorScheme ?? 'light'].tint} />
+                  </View>
+                  {receipt.order_number && (
+                    <ThemedText style={styles.orderNumber}>Order #{receipt.order_number}</ThemedText>
+                  )}
+                  {receipt.created_at && (
+                    <ThemedText style={styles.orderTime}>
+                      {new Date(receipt.created_at).toLocaleTimeString('en-US', { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      })}
+                    </ThemedText>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <IconSymbol 
+              name="doc.text.fill" 
+              size={64} 
+              color={Colors[colorScheme ?? 'light'].tint} 
+            />
+            <ThemedText style={styles.emptyTitle}>No orders found</ThemedText>
+            <ThemedText style={styles.emptyMessage}>
+              Scan your first receipt to get started
+            </ThemedText>
+            <TouchableOpacity 
+              style={[styles.scanButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint }]}
+              onPress={() => router.push('/(tabs)/capture')}
+            >
+              <IconSymbol name="camera.fill" size={20} color="#fff" />
+              <ThemedText style={styles.scanButtonText}>Scan Order Now</ThemedText>
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
     </ThemedView>
   );
 }
@@ -167,119 +135,90 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 16,
   },
-  iconContainer: {
-    marginBottom: 24,
-  },
-  headerRow: {
-    width: '100%',
-    maxWidth: 400,
+  header: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoButton: {
-    position: 'absolute',
-    right: 0,
-    padding: 8,
+    marginBottom: 8,
   },
   title: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 12,
-    textAlign: 'center',
   },
-  description: {
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 40,
-    opacity: 0.7,
+  viewAllText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
-  settingsContainer: {
-    width: '100%',
-    maxWidth: 400,
-    marginBottom: 32,
+  ordersList: {
+    gap: 12,
+  },
+  orderCard: {
     padding: 16,
-    backgroundColor: 'rgba(10, 126, 164, 0.1)',
     borderRadius: 12,
+    backgroundColor: 'rgba(10, 126, 164, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(10, 126, 164, 0.2)',
   },
-  settingsTitle: {
-    marginBottom: 12,
-    fontSize: 18,
+  orderInfo: {
+    gap: 8,
   },
-  settingRow: {
+  orderHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  settingRowSeparator: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(10, 126, 164, 0.2)',
-  },
-  settingInfo: {
-    flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginRight: 12,
   },
-  settingText: {
-    flex: 1,
+  orderTotal: {
+    fontSize: 24,
+    fontWeight: '700',
   },
-  settingLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  settingDescription: {
-    fontSize: 12,
+  orderNumber: {
+    fontSize: 14,
     opacity: 0.7,
   },
-  step: {
+  orderTime: {
+    fontSize: 12,
+    opacity: 0.6,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginTop: 24,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyMessage: {
+    fontSize: 16,
+    textAlign: 'center',
+    opacity: 0.7,
+    marginBottom: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    textAlign: 'center',
+    opacity: 0.6,
+  },
+  scanButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
-  },
-  stepText: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  instructionsTitle: {
-    marginBottom: 8,
-    fontSize: 20,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 420,
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
     borderRadius: 12,
-    padding: 16,
   },
-  closeButton: {
-    marginTop: 16,
-    alignSelf: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: 'rgba(10, 126, 164, 0.15)',
-  },
-  closeButtonText: {
+  scanButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

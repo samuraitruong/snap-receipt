@@ -1,9 +1,12 @@
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { getAutoPrinter, getPrintMargin, getPrintTemplate, getShopName, setAutoPrinter, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getAutoPrinter, getAutoSave, getOCRMode, getPrintMargin, getPrintTemplate, getShopName, OCRMode, setAutoPrinter, setAutoSave, setOCRMode, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Lazy require WebView to avoid dependency issues if not installed
 let WebView: any;
 try {
@@ -20,9 +23,13 @@ const TEMPLATE_OPTIONS: Array<{ id: PrintTemplateId; name: string; desc: string;
 ];
 
 export default function SettingsScreen() {
+  const colorScheme = useColorScheme();
+  const insets = useSafeAreaInsets();
   const [shopName, setShopNameState] = useState('');
   const [printMargin, setPrintMarginState] = useState<number>(8);
   const [autoPrinter, setAutoPrinterState] = useState(false);
+  const [autoSave, setAutoSaveState] = useState(false);
+  const [ocrMode, setOcrModeState] = useState<OCRMode>('vision');
   const [template, setTemplateState] = useState<PrintTemplateId>('classic');
   const [loading, setLoading] = useState(true);
   const [previewHtml, setPreviewHtml] = useState<string>('');
@@ -30,15 +37,19 @@ export default function SettingsScreen() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [name, margin, auto, tpl] = await Promise.all([
+        const [name, margin, auto, save, mode, tpl] = await Promise.all([
           getShopName(),
           getPrintMargin(),
           getAutoPrinter(),
+          getAutoSave(),
+          getOCRMode(),
           getPrintTemplate(),
         ]);
         setShopNameState(name);
         setPrintMarginState(margin);
         setAutoPrinterState(auto);
+        setAutoSaveState(save);
+        setOcrModeState(mode);
         setTemplateState(tpl);
       } finally {
         setLoading(false);
@@ -64,6 +75,17 @@ export default function SettingsScreen() {
     await setAutoPrinter(value);
   };
 
+  const handleToggleAutoSave = async (value: boolean) => {
+    setAutoSaveState(value);
+    await setAutoSave(value);
+  };
+
+  const handleOCRModeChange = async (value: boolean) => {
+    const newMode: OCRMode = value ? 'generative' : 'vision';
+    setOcrModeState(newMode);
+    await setOCRMode(newMode);
+  };
+
   const handleSelectTemplate = async (id: PrintTemplateId) => {
     setTemplateState(id);
     await setPrintTemplate(id);
@@ -77,8 +99,43 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView 
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: Platform.OS === 'ios' ? Math.max(insets.top + 8, 24) : 24 }
+        ]}
+      >
         <ThemedText type="title" style={styles.title}>Settings</ThemedText>
+
+        {/* OCR Mode */}
+        <View style={styles.card}>
+          <ThemedText type="subtitle" style={styles.cardTitle}>OCR Mode</ThemedText>
+          <View style={styles.rowBetween}>
+            <View style={styles.rowLeft}>
+              <IconSymbol 
+                name={ocrMode === 'vision' ? 'text.viewfinder' : 'sparkles'} 
+                size={20} 
+                color={Colors[colorScheme ?? 'light'].tint} 
+              />
+              <View style={styles.settingText}>
+                <ThemedText style={styles.label}>
+                  {ocrMode === 'vision' ? 'Vision AI' : 'Generative AI'}
+                </ThemedText>
+                <ThemedText style={styles.description}>
+                  {ocrMode === 'vision' 
+                    ? 'Fast text extraction using Vision API'
+                    : 'AI-powered formatting with product modifiers'}
+                </ThemedText>
+              </View>
+            </View>
+            <Switch
+              value={ocrMode === 'generative'}
+              onValueChange={handleOCRModeChange}
+              trackColor={{ false: '#767577', true: Colors[colorScheme ?? 'light'].tint }}
+              thumbColor={ocrMode === 'generative' ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
 
         {/* Shop Info */}
         <View style={styles.card}>
@@ -103,6 +160,14 @@ export default function SettingsScreen() {
               <ThemedText style={styles.label}>Auto Printer</ThemedText>
             </View>
             <Switch value={autoPrinter} onValueChange={handleToggleAuto} />
+          </View>
+
+          <View style={[styles.rowBetween, { marginTop: 16 }]}>
+            <View style={styles.rowLeft}>
+              <IconSymbol name="square.and.arrow.down.fill" size={20} color="#0a7ea4" />
+              <ThemedText style={styles.label}>Auto Save</ThemedText>
+            </View>
+            <Switch value={autoSave} onValueChange={handleToggleAutoSave} />
           </View>
 
           <ThemedText style={[styles.label, { marginTop: 16 }]}>Margin (mm)</ThemedText>
@@ -164,7 +229,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
     gap: 16,
   },
   title: {
@@ -206,6 +272,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
+    marginRight: 12,
+  },
+  settingText: {
+    flex: 1,
+  },
+  description: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginTop: 2,
   },
   templateList: {
     gap: 10,

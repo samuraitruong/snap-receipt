@@ -2,8 +2,9 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
+import { initDatabase, saveReceipt } from '@/utils/database';
 import { ReceiptData } from '@/utils/ocr';
-import { getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
+import { getAutoSave, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -18,7 +19,10 @@ export default function ReceiptScreen() {
   const extractedText = params.extractedText ? decodeURIComponent(params.extractedText as string) : '';
   const extractedDataType = params.extractedDataType as 'json' | 'text' | undefined;
   const orderNumber = params.orderNumber ? params.orderNumber as string : null;
+  const isExistingReceipt = params.isExistingReceipt === 'true' || (Array.isArray(params.isExistingReceipt) && params.isExistingReceipt[0] === 'true');
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(isExistingReceipt);
   const [shopName, setShopName] = useState<string>('');
   const [printMargin, setPrintMargin] = useState<number>(8);
   const [template, setTemplate] = useState<PrintTemplateId>('classic');
@@ -34,7 +38,7 @@ export default function ReceiptScreen() {
   const tertiaryText = useThemeColor({ light: '#333333', dark: '#CCCCCC' }, 'text');
   const tintColor = useThemeColor({ light: '#007AFF', dark: '#0A84FF' }, 'tint');
 
-  // Load printing preferences
+  // Load printing preferences and initialize database
   useEffect(() => {
     const loadPrefs = async () => {
       try {
@@ -46,6 +50,9 @@ export default function ReceiptScreen() {
         setShopName(name);
         setPrintMargin(margin);
         setTemplate(tpl);
+        
+        // Initialize database
+        await initDatabase();
       } catch (e) {
         // ignore
       }
@@ -171,6 +178,67 @@ export default function ReceiptScreen() {
     return receiptLines;
   })();
 
+  const handleSave = async (silent: boolean = false) => {
+    if (isSaving || isSaved || isExistingReceipt) return;
+    
+    try {
+      setIsSaving(true);
+      
+      const today = new Date().toISOString().split('T')[0];
+      const total = receiptData?.total || 0;
+      const receiptDataJson = JSON.stringify({
+        receiptData: receiptData || null,
+        receiptLines: filteredReceiptLines || null,
+        isJson: !!receiptData,
+        extractedText,
+        orderNumber,
+      });
+      
+      await saveReceipt({
+        date: today,
+        total_price: total,
+        receipt_data: receiptDataJson,
+        order_number: orderNumber || undefined,
+      });
+      
+      setIsSaved(true);
+      if (!silent) {
+        Alert.alert('Success', 'Receipt saved successfully');
+      }
+    } catch (error: any) {
+      console.error('Save error:', error);
+      if (!silent) {
+        Alert.alert('Save Error', 'Failed to save receipt. Please try again.');
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Auto-save if enabled (after receipt data is parsed)
+  // Skip auto-save for existing receipts
+  useEffect(() => {
+    if (isExistingReceipt) {
+      // Existing receipt is already saved, skip auto-save
+      return;
+    }
+    const autoSaveIfEnabled = async () => {
+      try {
+        const autoSave = await getAutoSave();
+        if (autoSave && !isSaved && !isSaving && (receiptData || (filteredReceiptLines && filteredReceiptLines.length > 0))) {
+          await handleSave(true);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    // Only auto-save after receipt data is parsed
+    if (receiptData || (filteredReceiptLines && filteredReceiptLines.length > 0)) {
+      autoSaveIfEnabled();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiptData, filteredReceiptLines, isSaved, isSaving, isExistingReceipt]);
+
   const handlePrint = async () => {
     try {
       setIsPrinting(true);
@@ -193,9 +261,23 @@ export default function ReceiptScreen() {
           bottom: printMargin,
         },
       });
-    } catch (error) {
-      console.error('Print error:', error);
-      Alert.alert('Print Error', 'Failed to print receipt. Please try again.');
+    } catch (error: any) {
+      // Check if error is due to user cancellation
+      const errorMessage = error?.message || String(error) || '';
+      const isCancellation = 
+        errorMessage.toLowerCase().includes('cancel') ||
+        errorMessage.toLowerCase().includes('did not complete') ||
+        errorMessage.toLowerCase().includes('user cancel') ||
+        errorMessage.toLowerCase().includes('aborted');
+      
+      if (isCancellation) {
+        // Silently handle cancellation - user intentionally cancelled
+        console.log('Print cancelled by user');
+      } else {
+        // Show error for actual print failures
+        console.error('Print error:', error);
+        Alert.alert('Print Error', 'Failed to print receipt. Please try again.');
+      }
     } finally {
       setIsPrinting(false);
     }
@@ -550,18 +632,32 @@ export default function ReceiptScreen() {
           <IconSymbol name="chevron.left" size={24} color={tintColor} />
         </TouchableOpacity>
         <ThemedText type="title" style={styles.title}>Receipt</ThemedText>
-        <TouchableOpacity 
-          onPress={handlePrint} 
-          style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
-          disabled={isPrinting}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <IconSymbol 
-            name="printer.fill" 
-            size={24} 
-            color={isPrinting ? secondaryText : tintColor} 
-          />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity 
+            onPress={() => handleSave(false)} 
+            style={[styles.saveButton, { backgroundColor: (isSaved || isExistingReceipt ? '#4CAF50' : tintColor) + '20' }]}
+            disabled={isSaving || isSaved || isExistingReceipt}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <IconSymbol 
+              name={isSaved || isExistingReceipt ? "checkmark.circle.fill" : "square.and.arrow.down.fill"} 
+              size={24} 
+              color={isSaved || isExistingReceipt ? '#4CAF50' : (isSaving ? secondaryText : tintColor)} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            onPress={handlePrint} 
+            style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
+            disabled={isPrinting}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <IconSymbol 
+              name="printer.fill" 
+              size={24} 
+              color={isPrinting ? secondaryText : tintColor} 
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
@@ -800,6 +896,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  saveButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   printButton: {
     width: 40,

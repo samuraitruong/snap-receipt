@@ -30,6 +30,9 @@ const MAPPING = {
   'info.circle': 'info',
   'plus.magnifyingglass': 'zoom-in',
   'minus.magnifyingglass': 'zoom-out',
+  'square.and.arrow.down.fill': 'save',
+  'checkmark.circle.fill': 'check-circle',
+  'calendar': 'calendar-today',
 } as IconMapping;
 
 /**
