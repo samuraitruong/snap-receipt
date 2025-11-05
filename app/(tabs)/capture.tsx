@@ -19,6 +19,7 @@ export default function CaptureScreen() {
   const [image, setImage] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [currentOrderNumber, setCurrentOrderNumber] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(0);
   const cameraRef = useRef<CameraView>(null);
 
   // Load current order number on mount
@@ -56,6 +57,10 @@ export default function CaptureScreen() {
       </ThemedView>
     );
   }
+
+  const clampZoom = (z: number) => Math.max(0, Math.min(1, z));
+  const increaseZoom = () => setZoom(prev => clampZoom(prev + 0.1));
+  const decreaseZoom = () => setZoom(prev => clampZoom(prev - 0.1));
 
   const takePicture = async () => {
     if (cameraRef.current) {
@@ -191,7 +196,7 @@ export default function CaptureScreen() {
           
           // Read as base64
           const base64 = await FileSystem.readAsStringAsync(imageUri, {
-            encoding: FileSystem.EncodingType.Base64,
+            encoding: 'base64',
           });
           base64Image = base64;
         } catch (fileError: any) {
@@ -205,7 +210,7 @@ export default function CaptureScreen() {
               const fileInfo = await FileSystem.getInfoAsync(normalizedUri);
               if (fileInfo.exists) {
                 const base64 = await FileSystem.readAsStringAsync(normalizedUri, {
-                  encoding: FileSystem.EncodingType.Base64,
+                  encoding: 'base64',
                 });
                 base64Image = base64;
               } else {
@@ -260,6 +265,7 @@ export default function CaptureScreen() {
         style={styles.camera}
         facing={facing}
         mode="picture"
+        zoom={zoom}
       >
         <View style={styles.overlay}>
           {/* Scan Frame at Top */}
@@ -309,15 +315,35 @@ export default function CaptureScreen() {
                 )}
               </View>
 
-              {/* Flip Camera Button - Smaller */}
-              <TouchableOpacity 
-                style={[styles.actionButton, styles.flipButton, styles.smallButton]} 
-                onPress={toggleCameraFacing}
-                activeOpacity={0.8}
-              >
-                <IconSymbol name="arrow.triangle.2.circlepath.camera.fill" size={20} color="#fff" />
-              </TouchableOpacity>
+              {/* Flip Button - Smaller */}
+              <View style={styles.rightButtons}>
+                <TouchableOpacity 
+                  style={[styles.actionButton, styles.flipButton, styles.smallButton]} 
+                  onPress={toggleCameraFacing}
+                  activeOpacity={0.8}
+                >
+                  <IconSymbol name="arrow.triangle.2.circlepath.camera.fill" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
             </View>
+          </View>
+
+          {/* Vertical Zoom Controls - compact, on right side */}
+          <View style={styles.zoomVertical}>
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.zoomButton, styles.zoomMiniButton]} 
+              onPress={increaseZoom}
+              activeOpacity={0.8}
+            >
+              <IconSymbol name="plus.magnifyingglass" size={20} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.zoomButton, styles.zoomMiniButton]} 
+              onPress={decreaseZoom}
+              activeOpacity={0.8}
+            >
+              <IconSymbol name="minus.magnifyingglass" size={20} color="#fff" />
+            </TouchableOpacity>
           </View>
         </View>
       </CameraView>
@@ -427,9 +453,9 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    paddingBottom: 50,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
     backgroundColor: 'transparent',
   },
   controlRow: {
@@ -465,6 +491,30 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 5,
+  },
+  rightButtons: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  zoomVertical: {
+    position: 'absolute',
+    right: 20,
+    bottom: 120,
+    gap: 10,
+    alignItems: 'center',
+  },
+  zoomButton: {
+    backgroundColor: '#0a7ea4',
+    shadowColor: '#0a7ea4',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  zoomMiniButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
       captureButtonWrapper: {
         alignItems: 'center',

@@ -28,6 +28,8 @@ const MAPPING = {
   'sparkles': 'auto-awesome',
   'printer.fill': 'print',
   'info.circle': 'info',
+  'plus.magnifyingglass': 'zoom-in',
+  'minus.magnifyingglass': 'zoom-out',
 } as IconMapping;
 
 /**
