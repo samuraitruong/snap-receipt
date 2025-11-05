@@ -6,11 +6,12 @@
  * 2. Enable the Vision API
  * 3. Set your API key in environment variables or replace the placeholder below
  * 
- * To use Google Generative AI:
+ * To use Google Generative AI (Recommended - more efficient):
  * 1. Get an API key from Google AI Studio
  * 2. Set EXPO_PUBLIC_GOOGLE_AI_KEY in environment variables
  * 3. Optionally set EXPO_PUBLIC_MODEL_ID (default: gemini-pro)
  *    Available models: gemini-pro, gemini-1.5-pro, gemini-1.5-flash, etc.
+ *    Note: Generative AI can now receive images directly - no Vision API needed!
  */
 
 const GOOGLE_VISION_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_VISION_API_KEY || '';
@@ -76,25 +77,22 @@ export interface ReceiptData {
 }
 
 /**
- * Format receipt text using Google Generative AI
- * Takes raw OCR text and returns structured JSON data
+ * Extract and format receipt directly from image using Google Generative AI
+ * Sends image directly to Gemini (no Vision API needed)
+ * This is more efficient than the two-step process
  */
-export async function formatReceiptWithGenerativeAI(rawText: string): Promise<ReceiptData> {
+export async function extractReceiptFromImageWithGenerativeAI(base64Image: string): Promise<ReceiptData> {
   if (!GOOGLE_AI_KEY || GOOGLE_AI_KEY === '') {
     throw new Error('Google AI key not configured. Please set EXPO_PUBLIC_GOOGLE_AI_KEY');
   }
 
-  if (!rawText || rawText.trim() === '') {
-    throw new Error('No text provided to format');
-  }
-
   try {
-    console.log('Formatting receipt with Generative AI, model:', MODEL_ID);
-    console.log('Raw text length:', rawText.length);
-    const prompt = `You are a receipt parsing assistant. Extract structured data from the following receipt text and return it as JSON.
+    console.log('Extracting receipt directly from image with Generative AI, model:', MODEL_ID);
+    
+    const prompt = `You are a receipt parsing assistant. Analyze this receipt image and extract structured data, returning it as JSON.
 
 CRITICAL EXTRACTION RULES - STRICT PARSING ONLY:
-- ONLY extract information that is EXPLICITLY visible in the receipt text
+- ONLY extract information that is EXPLICITLY visible in the receipt image
 - DO NOT add, infer, or assume any information that is not in the receipt
 - DO NOT modify items or add modifiers that are not visible
 - Parse exactly what you see, nothing more, nothing less
@@ -187,10 +185,20 @@ KEY POINTS:
 - Return ONLY the JSON, no other text
 - Be strict: only parse what you see, don't add anything
 
-Raw receipt text:
-${rawText}
-
 JSON response:`;
+
+    // Determine mime type from base64 string (assuming it might have data URL prefix)
+    let imageData = base64Image;
+    let mimeType = 'image/jpeg'; // default
+    
+    // Check if base64Image is a data URL
+    if (base64Image.startsWith('data:')) {
+      const mimeMatch = base64Image.match(/data:([^;]+);base64,/);
+      if (mimeMatch) {
+        mimeType = mimeMatch[1];
+        imageData = base64Image.split(',')[1];
+      }
+    }
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_AI_KEY}`,
@@ -199,9 +207,17 @@ JSON response:`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{
-            parts: [{
-              text: prompt
-            }]
+            parts: [
+              {
+                text: prompt
+              },
+              {
+                inline_data: {
+                  mime_type: mimeType,
+                  data: imageData
+                }
+              }
+            ]
           }]
         })
       }
@@ -307,37 +323,11 @@ JSON response:`;
 }
 
 /**
- * Extract and format text using Google Generative AI (Vision + Formatting)
- * This uses Vision API to extract text, then Generative AI to format it
+ * Extract and format receipt using Google Generative AI
+ * Sends image directly to Generative AI (no Vision API needed)
  */
 export async function extractAndFormatWithGenerativeAI(base64Image: string): Promise<ReceiptData> {
-  // First extract text using Vision API
-  if (!GOOGLE_VISION_API_KEY || GOOGLE_VISION_API_KEY === '') {
-    throw new Error('Google Vision API key not configured. Please set EXPO_PUBLIC_GOOGLE_VISION_API_KEY');
-  }
-
-  let rawText = '';
-  try {
-    rawText = await extractTextWithGoogleVision(base64Image);
-    if (!rawText || rawText.trim() === '') {
-      throw new Error('No text extracted from image. Please try again with a clearer image.');
-    }
-  } catch (error) {
-    console.error('Vision API failed:', error);
-    throw new Error(`Failed to extract text from image: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
-
-  // Then format it using Generative AI
-  if (!GOOGLE_AI_KEY || GOOGLE_AI_KEY === '') {
-    throw new Error('Google AI key not configured. Please set EXPO_PUBLIC_GOOGLE_AI_KEY');
-  }
-
-  try {
-    return await formatReceiptWithGenerativeAI(rawText);
-  } catch (error) {
-    console.error('Generative AI formatting failed:', error);
-    throw new Error(`Failed to format receipt: ${error instanceof Error ? error.message : 'Unknown error'}`);
-  }
+  return await extractReceiptFromImageWithGenerativeAI(base64Image);
 }
 
 /**
