@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const OCR_MODE_KEY = '@snap_receipt:ocr_mode';
+const AUTO_PRINTER_KEY = '@snap_receipt:auto_printer';
 
 export type OCRMode = 'vision' | 'generative';
 
@@ -25,6 +26,30 @@ export async function setOCRMode(mode: OCRMode): Promise<void> {
     await AsyncStorage.setItem(OCR_MODE_KEY, mode);
   } catch (error) {
     console.error('Error setting OCR mode:', error);
+  }
+}
+
+/**
+ * Get the Auto Printer setting
+ */
+export async function getAutoPrinter(): Promise<boolean> {
+  try {
+    const value = await AsyncStorage.getItem(AUTO_PRINTER_KEY);
+    return value === 'true'; // Default to false
+  } catch (error) {
+    console.error('Error getting auto printer setting:', error);
+    return false;
+  }
+}
+
+/**
+ * Set the Auto Printer setting
+ */
+export async function setAutoPrinter(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(AUTO_PRINTER_KEY, enabled ? 'true' : 'false');
+  } catch (error) {
+    console.error('Error setting auto printer setting:', error);
   }
 }
 

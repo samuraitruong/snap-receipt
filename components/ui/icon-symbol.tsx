@@ -27,6 +27,7 @@ const MAPPING = {
   'doc.text.fill': 'description',
   'sparkles': 'auto-awesome',
   'printer.fill': 'print',
+  'info.circle': 'info',
 } as IconMapping;
 
 /**
