@@ -1,98 +1,197 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { IconSymbol } from '@/components/ui/icon-symbol';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getOCRMode, OCRMode, setOCRMode } from '@/utils/settings';
+import { useEffect, useState } from 'react';
+import { StyleSheet, Switch, View } from 'react-native';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const colorScheme = useColorScheme();
+  const [ocrMode, setOcrMode] = useState<OCRMode>('vision');
+  const [isLoading, setIsLoading] = useState(true);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
+  useEffect(() => {
+    loadOCRMode();
+  }, []);
+
+  const loadOCRMode = async () => {
+    try {
+      const mode = await getOCRMode();
+      setOcrMode(mode);
+    } catch (error) {
+      console.error('Error loading OCR mode:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleModeChange = async (value: boolean) => {
+    const newMode: OCRMode = value ? 'generative' : 'vision';
+    setOcrMode(newMode);
+    await setOCRMode(newMode);
+  };
+
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.content}>
+        <View style={styles.iconContainer}>
+          <IconSymbol 
+            name="doc.text.fill" 
+            size={80} 
+            color={Colors[colorScheme ?? 'light'].tint} 
+          />
+        </View>
+        
+        <ThemedText type="title" style={styles.title}>
+          Snap Receipt
         </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
+        
+        <ThemedText style={styles.description}>
+          Capture receipts and extract text automatically
         </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+        
+        <View style={styles.settingsContainer}>
+          <ThemedText type="subtitle" style={styles.settingsTitle}>
+            OCR Mode
+          </ThemedText>
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <IconSymbol 
+                name={ocrMode === 'vision' ? 'text.viewfinder' : 'sparkles'} 
+                size={20} 
+                color={Colors[colorScheme ?? 'light'].tint} 
+              />
+              <View style={styles.settingText}>
+                <ThemedText style={styles.settingLabel}>
+                  {ocrMode === 'vision' ? 'Vision AI' : 'Generative AI'}
+                </ThemedText>
+                <ThemedText style={styles.settingDescription}>
+                  {ocrMode === 'vision' 
+                    ? 'Fast text extraction using Vision API'
+                    : 'AI-powered formatting with product modifiers'}
+                </ThemedText>
+              </View>
+            </View>
+            <Switch
+              value={ocrMode === 'generative'}
+              onValueChange={handleModeChange}
+              trackColor={{ false: '#767577', true: Colors[colorScheme ?? 'light'].tint }}
+              thumbColor={ocrMode === 'generative' ? '#fff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
+        <View style={styles.instructions}>
+          <ThemedText type="subtitle" style={styles.instructionsTitle}>
+            How to use:
+          </ThemedText>
+          <View style={styles.step}>
+            <IconSymbol name="camera.fill" size={24} color={Colors[colorScheme ?? 'light'].tint} />
+            <ThemedText style={styles.stepText}>
+              Go to the Capture tab to take a photo of your receipt
+            </ThemedText>
+          </View>
+          <View style={styles.step}>
+            <IconSymbol name="text.viewfinder" size={24} color={Colors[colorScheme ?? 'light'].tint} />
+            <ThemedText style={styles.stepText}>
+              The app will extract text using {ocrMode === 'vision' ? 'Vision AI' : 'Generative AI'}
+            </ThemedText>
+          </View>
+          <View style={styles.step}>
+            <IconSymbol name="doc.text.fill" size={24} color={Colors[colorScheme ?? 'light'].tint} />
+            <ThemedText style={styles.stepText}>
+              View your receipt in a formatted display
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  iconContainer: {
+    marginBottom: 24,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  description: {
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 40,
+    opacity: 0.7,
+  },
+  instructions: {
+    width: '100%',
+    maxWidth: 400,
+    gap: 16,
+  },
+  instructionsTitle: {
+    marginBottom: 8,
+    fontSize: 20,
+  },
+  step: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
+    paddingVertical: 8,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  stepText: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  settingsContainer: {
+    width: '100%',
+    maxWidth: 400,
+    marginBottom: 32,
+    padding: 16,
+    backgroundColor: 'rgba(10, 126, 164, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(10, 126, 164, 0.2)',
+  },
+  settingsTitle: {
+    marginBottom: 12,
+    fontSize: 18,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  settingInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginRight: 12,
+  },
+  settingText: {
+    flex: 1,
+  },
+  settingLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  settingDescription: {
+    fontSize: 12,
+    opacity: 0.7,
   },
 });

@@ -1,6 +1,64 @@
-# Welcome to your Expo app 👋
+# Snap Receipt 📸
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A modern mobile application for capturing, processing, and formatting receipts using OCR and AI technologies.
+
+## Introduction
+
+Snap Receipt is a React Native application built with Expo that simplifies receipt management for businesses. The app allows users to capture receipt photos using their device's camera, extract text using advanced OCR technology, and format receipts into clean, print-ready documents.
+
+The app is designed to replace manual receipt entry processes, providing businesses with a fast and accurate way to digitize and format receipt information. It supports both quick text extraction and AI-powered formatting, making it suitable for various business needs.
+
+## Project Objectives
+
+### Primary Objectives
+
+1. **Receipt Digitization**
+   - Capture high-quality receipt images using device camera
+   - Support both camera capture and gallery image selection
+   - Extract text from receipt images using OCR technology
+
+2. **Intelligent Text Processing**
+   - Provide two OCR modes:
+     - **Vision AI**: Fast text extraction using Google Cloud Vision API
+     - **Generative AI**: AI-powered formatting with product modifiers and proper alignment
+   - Automatically extract product quantities, names, and prices
+   - Identify and format product modifiers (e.g., "no onions", "extra cheese")
+
+3. **Receipt Formatting**
+   - Format receipts with proper alignment (product names left, prices right)
+   - Calculate GST (10% inclusive) and subtotal from total amount
+   - Display quantities in "Nx" format (e.g., "2x Product Name")
+   - Indent product modifiers for better readability
+
+4. **Print-Ready Output**
+   - Generate print-ready receipts in A5 format
+   - Support proper margins and formatting for receipt printers
+   - Include shop information, order numbers, and date/time stamps
+
+5. **Order Management**
+   - Generate unique order numbers starting from 100
+   - Daily reset of order numbers
+   - Persistent storage using Upstash Redis
+   - Environment-based prefixing for multi-environment support
+
+### Technical Objectives
+
+- **Cross-Platform**: Built with React Native and Expo for iOS and Android support
+- **Modern Architecture**: Uses Expo Router for file-based routing
+- **Cloud Integration**: Integrates with Google Cloud Vision API and Google Generative AI
+- **Scalable Backend**: Uses Upstash Redis for distributed order number management
+- **User Experience**: Clean, intuitive UI with toggle between OCR modes
+
+## Features
+
+- 📸 Camera capture and gallery image selection
+- 🔍 OCR text extraction with Google Cloud Vision API
+- 🤖 AI-powered receipt formatting with Google Generative AI
+- 📊 Automatic GST calculation (10% inclusive)
+- 📄 Print-ready A5 receipt format
+- 🔢 Daily-resetting order numbers with Redis
+- 🎨 Clean, modern user interface
+- ⚙️ Toggle between Vision AI and Generative AI modes
 
 ## Get started
 
