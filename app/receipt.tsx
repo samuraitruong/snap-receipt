@@ -3,10 +3,11 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { ReceiptData } from '@/utils/ocr';
+import { getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -18,6 +19,9 @@ export default function ReceiptScreen() {
   const extractedDataType = params.extractedDataType as 'json' | 'text' | undefined;
   const orderNumber = params.orderNumber ? params.orderNumber as string : null;
   const [isPrinting, setIsPrinting] = useState(false);
+  const [shopName, setShopName] = useState<string>('');
+  const [printMargin, setPrintMargin] = useState<number>(8);
+  const [template, setTemplate] = useState<PrintTemplateId>('classic');
   const [showImage, setShowImage] = useState(false);
   const insets = useSafeAreaInsets();
 
@@ -29,6 +33,25 @@ export default function ReceiptScreen() {
   const secondaryText = useThemeColor({ light: '#666666', dark: '#999999' }, 'text');
   const tertiaryText = useThemeColor({ light: '#333333', dark: '#CCCCCC' }, 'text');
   const tintColor = useThemeColor({ light: '#007AFF', dark: '#0A84FF' }, 'tint');
+
+  // Load printing preferences
+  useEffect(() => {
+    const loadPrefs = async () => {
+      try {
+        const [name, margin, tpl] = await Promise.all([
+          getShopName(),
+          getPrintMargin(),
+          getPrintTemplate(),
+        ]);
+        setShopName(name);
+        setPrintMargin(margin);
+        setTemplate(tpl);
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadPrefs();
+  }, []);
 
   // Parse JSON data or text data
   const parseReceiptData = (): { receiptData: ReceiptData | null; isJson: boolean } => {
@@ -163,12 +186,11 @@ export default function ReceiptScreen() {
       await Print.printAsync({
         html,
         orientation: Print.Orientation.portrait,
-        paperSize: [148, 210], // A5 size in mm (width x height)
         margins: {
-          left: 8,
-          top: 8,
-          right: 8,
-          bottom: 8,
+          left: printMargin,
+          top: printMargin,
+          right: printMargin,
+          bottom: printMargin,
         },
       });
     } catch (error) {
@@ -242,7 +264,7 @@ export default function ReceiptScreen() {
           <style>
             @page {
               size: A5 portrait;
-              margin: 8mm 10mm;
+              margin: ${printMargin}mm;
             }
             * {
               margin: 0;
@@ -252,7 +274,7 @@ export default function ReceiptScreen() {
             body {
               font-family: 'Courier New', monospace;
               margin: 0;
-              padding: 8mm 10mm;
+              padding: ${printMargin}mm;
               font-size: 11px;
               line-height: 1.5;
               width: 100%;
@@ -311,7 +333,7 @@ export default function ReceiptScreen() {
           </div>
           
           <div style="text-align: center; margin-bottom: 12px;">
-            <div class="shop-name">Pappa's Ocean Catch</div>
+            ${shopName ? `<div class="shop-name">${escapeHTML(shopName)}</div>` : ''}
             ${orderNum ? `<div class="order-number">Order #: ${escapeHTML(orderNum)}</div>` : ''}
             <div class="date-time">${escapeHTML(dateTimeStr)}</div>
             <div class="divider"></div>
@@ -419,7 +441,7 @@ export default function ReceiptScreen() {
           <style>
             @page {
               size: A5 portrait;
-              margin: 8mm 10mm;
+              margin: ${printMargin}mm;
             }
             * {
               margin: 0;
@@ -429,7 +451,7 @@ export default function ReceiptScreen() {
             body {
               font-family: 'Courier New', monospace;
               margin: 0;
-              padding: 8mm 10mm;
+              padding: ${printMargin}mm;
               font-size: 11px;
               line-height: 1.5;
               width: 100%;
@@ -488,7 +510,7 @@ export default function ReceiptScreen() {
           </div>
           
           <div style="text-align: center; margin-bottom: 12px;">
-            <div class="shop-name">Pappa's Ocean Catch</div>
+            ${shopName ? `<div class="shop-name">${escapeHTML(shopName)}</div>` : ''}
             ${orderNum ? `<div class="order-number">Order #: ${escapeHTML(orderNum)}</div>` : ''}
             <div class="date-time">${escapeHTML(dateTimeStr)}</div>
             <div class="divider"></div>
