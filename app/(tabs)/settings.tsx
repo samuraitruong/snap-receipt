@@ -3,9 +3,13 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getAutoPrinter, getAutoSave, getOCRMode, getPrintMargin, getPrintTemplate, getShopName, OCRMode, setAutoPrinter, setAutoSave, setOCRMode, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
+import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getOCRMode, getPrintMargin, getPrintTemplate, getShopName, OCRMode, setAutoPrinter, setAutoSave, setEpsonPrinterMac, setOCRMode, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
 import { useEffect, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
+import { NativeModules, Platform, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
+// Prefer the library's discovery hook when available
+// It requires the native module to be installed and Android build
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+import { usePrintersDiscovery } from 'react-native-esc-pos-printer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Lazy require WebView to avoid dependency issues if not installed
 let WebView: any;
@@ -33,17 +37,27 @@ export default function SettingsScreen() {
   const [template, setTemplateState] = useState<PrintTemplateId>('classic');
   const [loading, setLoading] = useState(true);
   const [previewHtml, setPreviewHtml] = useState<string>('');
+  const [epsonMac, setEpsonMac] = useState<string | null>(null);
+  const [printers, setPrinters] = useState<any[]>([]);
+  const [connecting, setConnecting] = useState(false);
+  // Pick discovery hook or a noop fallback to keep hook order stable
+  const useDiscovery: () => { start: () => void; isDiscovering: boolean; printers: any[] } =
+    typeof usePrintersDiscovery === 'function'
+      ? (usePrintersDiscovery as any)
+      : (() => ({ start: () => {}, isDiscovering: false, printers: [] }));
+  const { start, isDiscovering, printers: discoveredPrinters } = useDiscovery();
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [name, margin, auto, save, mode, tpl] = await Promise.all([
+        const [name, margin, auto, save, mode, tpl, savedMac] = await Promise.all([
           getShopName(),
           getPrintMargin(),
           getAutoPrinter(),
           getAutoSave(),
           getOCRMode(),
           getPrintTemplate(),
+          getEpsonPrinterMac(),
         ]);
         setShopNameState(name);
         setPrintMarginState(margin);
@@ -51,11 +65,18 @@ export default function SettingsScreen() {
         setAutoSaveState(save);
         setOcrModeState(mode);
         setTemplateState(tpl);
+        setEpsonMac(savedMac);
       } finally {
         setLoading(false);
       }
     };
     load();
+  }, []);
+
+  // Auto-start discovery on Android builds when hook is available
+  useEffect(() => {
+    try { start && start(); } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSaveShopName = async (value: string) => {
@@ -89,6 +110,54 @@ export default function SettingsScreen() {
   const handleSelectTemplate = async (id: PrintTemplateId) => {
     setTemplateState(id);
     await setPrintTemplate(id);
+  };
+
+  const scanEpsonPrinters = async () => {
+    try {
+      if (!NativeModules || !('EscPosPrinter' in NativeModules)) {
+        alert('Epson printer module not available. Install the library and rebuild the app.');
+        return;
+      }
+      const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
+      const EpsonModule = mod?.EscPosPrinter as any;
+      if (!EpsonModule) {
+        alert('Epson module not installed in this build.');
+        return;
+      }
+      const list = await EpsonModule.discover();
+      setPrinters(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error('Scan error:', e);
+      alert('Failed to scan printers');
+    }
+  };
+
+  const connectEpson = async (printer: any) => {
+    try {
+      if (!NativeModules || !('EscPosPrinter' in NativeModules)) {
+        alert('Epson printer module not available. Install the library and rebuild the app.');
+        return;
+      }
+      const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
+      const EpsonModule = mod?.EscPosPrinter as any;
+      if (!EpsonModule) {
+        alert('Epson module not installed in this build.');
+        return;
+      }
+      setConnecting(true);
+      const device = await EpsonModule.connect(printer.target);
+      const mac = device?.target || printer?.target;
+      if (mac) {
+        await setEpsonPrinterMac(mac);
+        setEpsonMac(mac);
+        alert(`Connected to ${printer.name || mac}`);
+      }
+    } catch (e) {
+      console.error('Connection error:', e);
+      alert('Failed to connect');
+    } finally {
+      setConnecting(false);
+    }
   };
 
   // Build preview HTML whenever inputs change
@@ -159,6 +228,31 @@ export default function SettingsScreen() {
               <IconSymbol name="printer.fill" size={20} color="#0a7ea4" />
               <ThemedText style={styles.label}>Auto Printer</ThemedText>
             </View>
+
+      {/* Epson Printer (Bluetooth) */}
+      <View style={styles.card}>
+          <ThemedText type="subtitle" style={styles.cardTitle}>Epson Printer (Bluetooth)</ThemedText>
+          <ThemedText style={styles.noteText}>{epsonMac ? `Saved printer: ${epsonMac}` : 'No printer saved'}</ThemedText>
+          <View style={styles.rowBetween}>
+            <TouchableOpacity onPress={scanEpsonPrinters} style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '20' }]}>
+              <ThemedText style={[styles.buttonText, { color: Colors[colorScheme ?? 'light'].tint }]}>Scan Printers</ThemedText>
+            </TouchableOpacity>
+            {epsonMac && (
+              <TouchableOpacity onPress={async () => { await setEpsonPrinterMac(null); setEpsonMac(null); }} style={[styles.buttonOutline, { borderColor: Colors[colorScheme ?? 'light'].tint }]}>
+                <ThemedText style={[styles.buttonText, { color: Colors[colorScheme ?? 'light'].tint }]}>Clear Saved</ThemedText>
+              </TouchableOpacity>
+            )}
+          </View>
+          {(discoveredPrinters.length > 0 || printers.length > 0) && (
+            <View style={{ gap: 8, marginTop: 8 }}>
+              {(discoveredPrinters.length > 0 ? discoveredPrinters : printers).map((p) => (
+                <TouchableOpacity key={p.target} onPress={() => connectEpson(p)} style={[styles.buttonOutline, { borderColor: Colors[colorScheme ?? 'light'].tint }]} disabled={connecting}>
+                  <ThemedText style={[styles.buttonText, { color: Colors[colorScheme ?? 'light'].tint }]}>{connecting ? 'Connecting…' : `Connect: ${p.name || p.target}`}</ThemedText>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+      </View>
             <Switch value={autoPrinter} onValueChange={handleToggleAuto} />
           </View>
 
@@ -282,6 +376,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     opacity: 0.7,
     marginTop: 2,
+  },
+  noteText: {
+    fontSize: 12,
+    opacity: 0.7,
+    marginBottom: 8,
+  },
+  button: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  buttonOutline: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   templateList: {
     gap: 10,

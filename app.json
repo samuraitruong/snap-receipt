@@ -48,6 +48,8 @@
       "bundleIdentifier": "com.snapreceipt.app",
       "buildNumber": "1",
       "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Use this to communicate with the printer.",
+        "UISupportedExternalAccessoryProtocols": ["com.epson.escpos"],
         "NSCameraUsageDescription": "This app needs access to your camera to capture receipt photos.",
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to select receipt images.",
         "CFBundleDisplayName": "Snap Receipt",
@@ -69,7 +71,11 @@
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN"
       ]
     },
     "experiments": {

@@ -6,6 +6,7 @@ const PRINT_MARGIN_KEY = '@snap_receipt:print_margin_mm';
 const PRINT_TEMPLATE_KEY = '@snap_receipt:print_template';
 const AUTO_PRINTER_KEY = '@snap_receipt:auto_printer';
 const AUTO_SAVE_KEY = '@snap_receipt:auto_save';
+const EPSON_PRINTER_MAC_KEY = '@snap_receipt:epson_printer_mac';
 
 export type OCRMode = 'vision' | 'generative';
 export type PrintTemplateId = 'classic' | 'compact' | 'kitchen';
@@ -153,6 +154,33 @@ export async function setAutoSave(enabled: boolean): Promise<void> {
     await AsyncStorage.setItem(AUTO_SAVE_KEY, enabled ? 'true' : 'false');
   } catch (error) {
     console.error('Error setting auto save setting:', error);
+  }
+}
+
+/**
+ * Get saved Epson printer MAC address
+ */
+export async function getEpsonPrinterMac(): Promise<string | null> {
+  try {
+    return (await AsyncStorage.getItem(EPSON_PRINTER_MAC_KEY)) || null;
+  } catch (error) {
+    console.error('Error getting Epson printer MAC:', error);
+    return null;
+  }
+}
+
+/**
+ * Save Epson printer MAC address
+ */
+export async function setEpsonPrinterMac(mac: string | null): Promise<void> {
+  try {
+    if (mac) {
+      await AsyncStorage.setItem(EPSON_PRINTER_MAC_KEY, mac);
+    } else {
+      await AsyncStorage.removeItem(EPSON_PRINTER_MAC_KEY);
+    }
+  } catch (error) {
+    console.error('Error setting Epson printer MAC:', error);
   }
 }
 

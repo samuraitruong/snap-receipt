@@ -4,12 +4,12 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { getLocalDateString, initDatabase, saveReceipt } from '@/utils/database';
 import { ReceiptData } from '@/utils/ocr';
-import { getAutoSave, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
+import { getAutoSave, getEpsonPrinterMac, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, NativeModules, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ReceiptScreen() {
@@ -21,6 +21,7 @@ export default function ReceiptScreen() {
   const orderNumber = params.orderNumber ? params.orderNumber as string : null;
   const isExistingReceipt = params.isExistingReceipt === 'true' || (Array.isArray(params.isExistingReceipt) && params.isExistingReceipt[0] === 'true');
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isEpsonPrinting, setIsEpsonPrinting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(isExistingReceipt);
   const [shopName, setShopName] = useState<string>('');
@@ -59,6 +60,40 @@ export default function ReceiptScreen() {
     };
     loadPrefs();
   }, []);
+
+  const handleEpsonPrint = async () => {
+    try {
+      if (Platform.OS !== 'android' || !NativeModules || !('EscPosPrinter' in NativeModules)) {
+        Alert.alert('Printer', 'Epson module not available. Install the library and rebuild the Android app.');
+        return;
+      }
+      const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
+      const EpsonModule = mod?.EscPosPrinter;
+      if (!EpsonModule) {
+        Alert.alert('Printer', 'Epson module not installed in this build.');
+        return;
+      }
+      const mac = await getEpsonPrinterMac();
+      if (!mac) {
+        Alert.alert('Printer', 'No Epson printer saved. Go to Settings > Epson Printer to connect and save one.');
+        return;
+      }
+      setIsEpsonPrinting(true);
+      const printer = new EpsonModule(mac, 80);
+      await printer.init();
+      await printer.align('center');
+      await printer.printLine('Hello World');
+      await printer.newLine();
+      await printer.cut();
+      await printer.close();
+      Alert.alert('Printer', 'Printed to Epson successfully');
+    } catch (error) {
+      console.error('Epson print error:', error);
+      Alert.alert('Printer Error', 'Failed to print to Epson');
+    } finally {
+      setIsEpsonPrinting(false);
+    }
+  };
 
   // Parse JSON data or text data
   const parseReceiptData = (): { receiptData: ReceiptData | null; isJson: boolean } => {
@@ -653,6 +688,18 @@ export default function ReceiptScreen() {
               name="printer.fill" 
               size={24} 
               color={isPrinting ? secondaryText : tintColor} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            onPress={handleEpsonPrint} 
+            style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
+            disabled={isEpsonPrinting}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <IconSymbol 
+              name="printer.fill" 
+              size={24} 
+              color={isEpsonPrinting ? secondaryText : tintColor} 
             />
           </TouchableOpacity>
         </View>
