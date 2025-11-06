@@ -1,11 +1,12 @@
+import { OrderItem } from '@/components/order-item';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { getTodayReceipts, initDatabase, type ReceiptRecord } from '@/utils/database';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { useState, useCallback } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -64,9 +65,10 @@ export default function HomeScreen() {
         ) : todayReceipts.length > 0 ? (
           <View style={styles.ordersList}>
             {todayReceipts.map((receipt) => (
-              <TouchableOpacity
+              <OrderItem
                 key={receipt.id}
-                onPress={() => {
+                receipt={receipt}
+                onPress={(receipt) => {
                   try {
                     const data = JSON.parse(receipt.receipt_data);
                     router.push({
@@ -83,26 +85,10 @@ export default function HomeScreen() {
                     console.error('Error opening receipt:', e);
                   }
                 }}
-                style={styles.orderCard}
-              >
-                <View style={styles.orderInfo}>
-                  <View style={styles.orderHeader}>
-                    <ThemedText style={styles.orderTotal}>${receipt.total_price.toFixed(2)}</ThemedText>
-                    <IconSymbol name="chevron.right" size={20} color={Colors[colorScheme ?? 'light'].tint} />
-                  </View>
-                  {receipt.order_number && (
-                    <ThemedText style={styles.orderNumber}>Order #{receipt.order_number}</ThemedText>
-                  )}
-                  {receipt.created_at && (
-                    <ThemedText style={styles.orderTime}>
-                      {new Date(receipt.created_at).toLocaleTimeString('en-US', { 
-                        hour: '2-digit', 
-                        minute: '2-digit' 
-                      })}
-                    </ThemedText>
-                  )}
-                </View>
-              </TouchableOpacity>
+                cardBackground="rgba(10, 126, 164, 0.1)"
+                borderColor="rgba(10, 126, 164, 0.2)"
+                secondaryText={Colors[colorScheme ?? 'light'].text}
+              />
             ))}
           </View>
         ) : (
@@ -155,33 +141,6 @@ const styles = StyleSheet.create({
   },
   ordersList: {
     gap: 12,
-  },
-  orderCard: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: 'rgba(10, 126, 164, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(10, 126, 164, 0.2)',
-  },
-  orderInfo: {
-    gap: 8,
-  },
-  orderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  orderTotal: {
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  orderNumber: {
-    fontSize: 14,
-    opacity: 0.7,
-  },
-  orderTime: {
-    fontSize: 12,
-    opacity: 0.6,
   },
   emptyContainer: {
     flex: 1,

@@ -48,11 +48,14 @@ async function redisCommand(command: string, args: any[] = []): Promise<any> {
 }
 
 /**
- * Get the current date as YYYY-MM-DD string
+ * Get the current date as YYYY-MM-DD string (local timezone, not UTC)
  */
 function getCurrentDate(): string {
   const now = new Date();
-  return now.toISOString().split('T')[0]; // Returns YYYY-MM-DD
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**

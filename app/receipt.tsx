@@ -2,7 +2,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { initDatabase, saveReceipt } from '@/utils/database';
+import { getLocalDateString, initDatabase, saveReceipt } from '@/utils/database';
 import { ReceiptData } from '@/utils/ocr';
 import { getAutoSave, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
@@ -184,7 +184,7 @@ export default function ReceiptScreen() {
     try {
       setIsSaving(true);
       
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateString();
       const total = receiptData?.total || 0;
       const receiptDataJson = JSON.stringify({
         receiptData: receiptData || null,
@@ -410,7 +410,6 @@ export default function ReceiptScreen() {
         </head>
         <body>
           <div class="receipt-header">
-            <div class="receipt-title">RECEIPT</div>
             <div class="divider"></div>
           </div>
           
@@ -587,7 +586,6 @@ export default function ReceiptScreen() {
         </head>
         <body>
           <div class="receipt-header">
-            <div class="receipt-title">RECEIPT</div>
             <div class="divider"></div>
           </div>
           
@@ -686,7 +684,6 @@ export default function ReceiptScreen() {
 
         <ThemedView style={[styles.receiptContainer, { backgroundColor: cardBackground }]}>
           <View style={styles.receiptHeader}>
-            <ThemedText type="subtitle" style={styles.receiptTitle}>RECEIPT</ThemedText>
             <View style={[styles.divider, { backgroundColor: borderColor }]} />
           </View>
 

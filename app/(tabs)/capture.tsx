@@ -95,6 +95,7 @@ export default function CaptureScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
+      aspect: [3, 4], // Portrait aspect ratio suitable for receipts (width:height)
       quality: 1,
       base64: true, // Request base64 directly to avoid file reading issues
     });

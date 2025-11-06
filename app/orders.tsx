@@ -1,8 +1,9 @@
+import { OrderItem } from '@/components/order-item';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { getAvailableDates, getReceiptsByDate, initDatabase, type ReceiptRecord } from '@/utils/database';
+import { getAvailableDates, getLocalDateString, getReceiptsByDate, initDatabase, type ReceiptRecord } from '@/utils/database';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -19,7 +20,7 @@ try {
 
 export default function OrdersScreen() {
   const router = useRouter();
-  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState<string>(getLocalDateString());
   const [receipts, setReceipts] = useState<ReceiptRecord[]>([]);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,12 +77,12 @@ export default function OrdersScreen() {
       setShowDatePicker(false);
     }
     if (event.type === 'set' && selectedDate) {
-      const dateStr = selectedDate.toISOString().split('T')[0];
+      const dateStr = getLocalDateString(selectedDate);
       setSelectedDate(dateStr);
       setDatePickerValue(selectedDate);
     } else if (Platform.OS === 'ios') {
       if (selectedDate) {
-        const dateStr = selectedDate.toISOString().split('T')[0];
+        const dateStr = getLocalDateString(selectedDate);
         setSelectedDate(dateStr);
         setDatePickerValue(selectedDate);
       }
@@ -120,14 +121,6 @@ export default function OrdersScreen() {
     }
   };
 
-  const formatTime = (dateStr: string): string => {
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return '';
-    }
-  };
 
   const formatCompactDate = (dateStr: string): string => {
     try {
@@ -141,8 +134,9 @@ export default function OrdersScreen() {
   const getPreviousDate = (): string | null => {
     if (!selectedDate || availableDates.length === 0) return null;
     const currentIndex = availableDates.indexOf(selectedDate);
-    if (currentIndex > 0) {
-      return availableDates[currentIndex - 1];
+    // Dates are sorted DESC (newest first), so previous = older date = higher index
+    if (currentIndex < availableDates.length - 1) {
+      return availableDates[currentIndex + 1];
     }
     return null;
   };
@@ -150,8 +144,9 @@ export default function OrdersScreen() {
   const getNextDate = (): string | null => {
     if (!selectedDate || availableDates.length === 0) return null;
     const currentIndex = availableDates.indexOf(selectedDate);
-    if (currentIndex < availableDates.length - 1) {
-      return availableDates[currentIndex + 1];
+    // Dates are sorted DESC (newest first), so next = newer date = lower index
+    if (currentIndex > 0) {
+      return availableDates[currentIndex - 1];
     }
     return null;
   };
@@ -271,30 +266,14 @@ export default function OrdersScreen() {
         ) : (
           <View style={styles.receiptsList}>
             {receipts.map((receipt) => (
-              <TouchableOpacity
+              <OrderItem
                 key={receipt.id}
-                onPress={() => handleReceiptPress(receipt)}
-                style={[styles.receiptCard, { backgroundColor: cardBackground, borderColor }]}
-              >
-                <View style={styles.receiptHeader}>
-                  <View style={styles.receiptInfo}>
-                    <ThemedText style={styles.receiptTotal}>${receipt.total_price.toFixed(2)}</ThemedText>
-                    {receipt.order_number && (
-                      <ThemedText style={[styles.receiptOrder, { color: secondaryText }]}>
-                        Order #{receipt.order_number}
-                      </ThemedText>
-                    )}
-                  </View>
-                  <View style={styles.receiptTime}>
-                    {receipt.created_at && (
-                      <ThemedText style={[styles.receiptTimeText, { color: secondaryText }]}>
-                        {formatTime(receipt.created_at)}
-                      </ThemedText>
-                    )}
-                    <IconSymbol name="chevron.right" size={20} color={secondaryText} />
-                  </View>
-                </View>
-              </TouchableOpacity>
+                receipt={receipt}
+                onPress={handleReceiptPress}
+                cardBackground={cardBackground}
+                borderColor={borderColor}
+                secondaryText={secondaryText}
+              />
             ))}
           </View>
         )}
@@ -393,35 +372,6 @@ const styles = StyleSheet.create({
   },
   receiptsList: {
     gap: 12,
-  },
-  receiptCard: {
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  receiptHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  receiptInfo: {
-    flex: 1,
-  },
-  receiptTotal: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  receiptOrder: {
-    fontSize: 12,
-  },
-  receiptTime: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  receiptTimeText: {
-    fontSize: 12,
   },
   emptyText: {
     textAlign: 'center',

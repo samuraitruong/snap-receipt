@@ -8,6 +8,17 @@ const TURSO_URL = process.env.EXPO_PUBLIC_TURSO_URL || '';
 const TURSO_TOKEN = process.env.EXPO_PUBLIC_TURSO_TOKEN || '';
 
 /**
+ * Get local date string in YYYY-MM-DD format (not UTC)
+ * This ensures dates are saved based on the user's local timezone
+ */
+export function getLocalDateString(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Check if database is configured
  */
 function isDatabaseConfigured(): boolean {
@@ -139,7 +150,7 @@ export async function getTodayReceipts(limit: number = 5): Promise<ReceiptRecord
   }
 
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString();
     const client = getClient();
     const result = await client.execute({
       sql: `
