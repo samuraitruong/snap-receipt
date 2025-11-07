@@ -4,12 +4,12 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { getLocalDateString, initDatabase, saveReceipt } from '@/utils/database';
 import { ReceiptData } from '@/utils/ocr';
-import { getAutoSave, getEpsonPrinterMac, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
+import { getAutoSave, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Alert, NativeModules, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, NativeModules, Platform, ScrollView, StyleSheet, TouchableOpacity, View, findNodeHandle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ReceiptScreen() {
@@ -22,6 +22,41 @@ export default function ReceiptScreen() {
   const isExistingReceipt = params.isExistingReceipt === 'true' || (Array.isArray(params.isExistingReceipt) && params.isExistingReceipt[0] === 'true');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isEpsonPrinting, setIsEpsonPrinting] = useState(false);
+  const printViewRef = useRef<View>(null);
+
+  // Optional discovery hook wrapper: use library hook when available, else no-op
+  let useDiscovery: () => { start: (params?: any) => void; isDiscovering: boolean; printers: any[] };
+  let DiscoveryPortType: any = null;
+  let moduleAvailable = false;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const mod = require('react-native-esc-pos-printer');
+    if (mod && mod.usePrintersDiscovery) {
+      useDiscovery = mod.usePrintersDiscovery as any;
+      // Get DiscoveryPortType constants for WiFi/LAN support
+      if (mod.DiscoveryPortType) {
+        DiscoveryPortType = mod.DiscoveryPortType;
+      } else if (mod.DiscoveryFilterOption) {
+        DiscoveryPortType = mod.DiscoveryFilterOption;
+      }
+      moduleAvailable = true;
+      console.log('Epson module loaded successfully');
+    } else {
+      useDiscovery = () => ({ start: () => {}, isDiscovering: false, printers: [] });
+      console.warn('Epson module found but usePrintersDiscovery not available');
+    }
+  } catch (e) {
+    useDiscovery = () => ({ start: () => {}, isDiscovering: false, printers: [] });
+    console.warn('Epson module not found:', e);
+  }
+  const { start: startDiscovery, isDiscovering, printers } = useDiscovery();
+  
+  // Log discovery status
+  useEffect(() => {
+    if (moduleAvailable) {
+      console.log('Epson discovery status:', { isDiscovering, printerCount: printers?.length || 0 });
+    }
+  }, [isDiscovering, printers, moduleAvailable]);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(isExistingReceipt);
   const [shopName, setShopName] = useState<string>('');
@@ -61,37 +96,94 @@ export default function ReceiptScreen() {
     loadPrefs();
   }, []);
 
+  // Start discovery for test printing to first printer - search for both Bluetooth and WiFi/LAN printers
+  useEffect(() => {
+    if (moduleAvailable && startDiscovery) {
+      try {
+        // Search for all port types (Bluetooth, WiFi/LAN TCP, USB)
+        const discoveryParams = DiscoveryPortType ? {
+          filterOption: {
+            portType: DiscoveryPortType.PORTTYPE_ALL || 0, // 0 = PORTTYPE_ALL
+          },
+        } : undefined;
+        startDiscovery(discoveryParams);
+        console.log('Started Epson printer discovery (Bluetooth + WiFi/LAN)');
+      } catch (e) {
+        console.error('Failed to start discovery:', e);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleEpsonPrint = async () => {
     try {
-      if (Platform.OS !== 'android' || !NativeModules || !('EscPosPrinter' in NativeModules)) {
-        Alert.alert('Printer', 'Epson module not available. Install the library and rebuild the Android app.');
+      // Check if printers are available from the hook
+      const target = printers && printers.length > 0 && printers[0]?.target;
+      if (!target) {
+        Alert.alert(
+          'No Printers Found',
+          'No printers were discovered. Make sure:\n\n1. Bluetooth/WiFi is enabled on your device\n2. The printer is powered on\n3. For Bluetooth: printer is in pairing/discovery mode and within range\n4. For WiFi/LAN: printer is on the same network\n\nDiscovery runs automatically in the background.'
+        );
         return;
       }
-      const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
-      const EpsonModule = mod?.EscPosPrinter;
+
+      // Try to load the module
+      let EpsonModule: any = null;
+      try {
+        const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
+        EpsonModule = mod?.EscPosPrinter;
+      } catch (e) {
+        console.error('Failed to import Epson module:', e);
+      }
+
+      // Also try checking NativeModules (for release builds)
+      if (!EpsonModule && NativeModules && 'EscPosPrinter' in NativeModules) {
+        EpsonModule = NativeModules.EscPosPrinter;
+      }
+
       if (!EpsonModule) {
-        Alert.alert('Printer', 'Epson module not installed in this build.');
+        Alert.alert(
+          'Printer Module Not Found', 
+          'The Epson printer module is not included in this build. Make sure you:\n\n1. Installed react-native-esc-pos-printer\n2. Rebuilt the app with npx expo run:android\n3. Not using Expo Go (use a development build)'
+        );
         return;
       }
-      const mac = await getEpsonPrinterMac();
-      if (!mac) {
-        Alert.alert('Printer', 'No Epson printer saved. Go to Settings > Epson Printer to connect and save one.');
+
+      const viewTag = findNodeHandle(printViewRef.current);
+      if (!viewTag) {
+        Alert.alert('Printer', 'Printable view not ready.');
         return;
       }
+
       setIsEpsonPrinting(true);
-      const printer = new EpsonModule(mac, 80);
-      await printer.init();
-      await printer.align('center');
-      await printer.printLine('Hello World');
-      await printer.newLine();
-      await printer.cut();
-      await printer.close();
-      Alert.alert('Printer', 'Printed to Epson successfully');
-    } catch (error) {
-      console.error('Epson print error:', error);
-      Alert.alert('Printer Error', 'Failed to print to Epson');
-    } finally {
+      console.log(`Printing to printer: ${printers[0]?.name || target}`);
+      
+      // Based on the library example (PrintFromView)
+      // Try different API methods
+      if (typeof EpsonModule.printFromView === 'function') {
+        await EpsonModule.printFromView(target, viewTag, 80);
+      } else if (EpsonModule.prototype && typeof EpsonModule.prototype.printFromView === 'function') {
+        const printer = new EpsonModule(target, 80);
+        await printer.printFromView(viewTag);
+        await printer.close?.();
+      } else if (typeof EpsonModule === 'function') {
+        // Try constructor approach
+        const printer = new EpsonModule(target, 80);
+        await printer.init?.();
+        await printer.printFromView?.(viewTag);
+        await printer.close?.();
+      } else {
+        Alert.alert('Printer', 'printFromView API not available. Check library version.');
+        setIsEpsonPrinting(false);
+        return;
+      }
+      
+      Alert.alert('Success', 'Print job sent to printer');
       setIsEpsonPrinting(false);
+    } catch (error: any) {
+      console.error('Epson print error:', error);
+      setIsEpsonPrinting(false);
+      Alert.alert('Printer Error', `Failed to print: ${error?.message || 'Unknown error'}`);
     }
   };
 
@@ -449,7 +541,7 @@ export default function ReceiptScreen() {
           </div>
           
           <div style="text-align: center; margin-bottom: 12px;">
-            ${shopName ? `<div class="shop-name">${escapeHTML(shopName)}</div>` : ''}
+            <div class="shop-name">${escapeHTML(shopName || 'Pappas Ocean Catch')}</div>
             ${orderNum ? `<div class="order-number">Order #: ${escapeHTML(orderNum)}</div>` : ''}
             <div class="date-time">${escapeHTML(dateTimeStr)}</div>
             <div class="divider"></div>
@@ -625,7 +717,7 @@ export default function ReceiptScreen() {
           </div>
           
           <div style="text-align: center; margin-bottom: 12px;">
-            ${shopName ? `<div class="shop-name">${escapeHTML(shopName)}</div>` : ''}
+            <div class="shop-name">${escapeHTML(shopName || 'Pappas Ocean Catch')}</div>
             ${orderNum ? `<div class="order-number">Order #: ${escapeHTML(orderNum)}</div>` : ''}
             <div class="date-time">${escapeHTML(dateTimeStr)}</div>
             <div class="divider"></div>
@@ -697,7 +789,7 @@ export default function ReceiptScreen() {
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <IconSymbol 
-              name="printer.fill" 
+              name="antenna.radiowaves.left.and.right" 
               size={24} 
               color={isEpsonPrinting ? secondaryText : tintColor} 
             />
@@ -729,7 +821,7 @@ export default function ReceiptScreen() {
           </View>
         )}
 
-        <ThemedView style={[styles.receiptContainer, { backgroundColor: cardBackground }]}>
+        <View ref={printViewRef} style={[styles.receiptContainer, { backgroundColor: cardBackground }]}>
           <View style={styles.receiptHeader}>
             <View style={[styles.divider, { backgroundColor: borderColor }]} />
           </View>
@@ -910,7 +1002,7 @@ export default function ReceiptScreen() {
           <View style={styles.receiptFooter}>
             <ThemedText style={[styles.footerText, { color: secondaryText }]}>Thank you for your purchase!</ThemedText>
           </View>
-        </ThemedView>
+        </View>
       </ScrollView>
     </ThemedView>
   );

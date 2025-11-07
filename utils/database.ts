@@ -177,6 +177,39 @@ export async function getTodayReceipts(limit: number = 5): Promise<ReceiptRecord
 }
 
 /**
+ * Get last N receipts from any date, ordered by most recent first
+ */
+export async function getRecentReceipts(limit: number = 5): Promise<ReceiptRecord[]> {
+  if (!isDatabaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const client = getClient();
+    const result = await client.execute({
+      sql: `
+        SELECT * FROM receipts 
+        ORDER BY created_at DESC
+        LIMIT ?
+      `,
+      args: [limit],
+    });
+
+    return result.rows.map(row => ({
+      id: Number(row.id),
+      date: String(row.date),
+      total_price: Number(row.total_price),
+      receipt_data: String(row.receipt_data),
+      order_number: row.order_number ? String(row.order_number) : undefined,
+      created_at: row.created_at ? String(row.created_at) : undefined,
+    }));
+  } catch (error) {
+    console.error('Error getting recent receipts:', error);
+    return [];
+  }
+}
+
+/**
  * Get all receipts ordered by date descending
  */
 export async function getAllReceipts(): Promise<ReceiptRecord[]> {

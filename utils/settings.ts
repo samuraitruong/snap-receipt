@@ -17,10 +17,10 @@ export type PrintTemplateId = 'classic' | 'compact' | 'kitchen';
 export async function getOCRMode(): Promise<OCRMode> {
   try {
     const mode = await AsyncStorage.getItem(OCR_MODE_KEY);
-    return (mode as OCRMode) || 'vision'; // Default to vision
+    return (mode as OCRMode) || 'generative'; // Default to generative
   } catch (error) {
     console.error('Error getting OCR mode:', error);
-    return 'vision';
+    return 'generative';
   }
 }
 
