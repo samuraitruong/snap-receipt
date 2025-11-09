@@ -3,8 +3,8 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode, getPrintCopies, getPrintMargin, getPrintTemplate, getShopName, OCRMode, setAutoPrinter, setAutoSave, setEpsonPrinterMac, setImageOptimization, setImageOptimizationQuality, setImageOptimizationResizeWidth, setOCRMode, setPrintCopies, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
 import { formatDateTime } from '@/utils/printer';
+import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode, getPrintCopies, getPrinterType, getPrintMargin, getPrintTemplate, getShopName, OCRMode, PrinterType, setAutoPrinter, setAutoSave, setEpsonPrinterMac, setImageOptimization, setImageOptimizationQuality, setImageOptimizationResizeWidth, setOCRMode, setPrintCopies, setPrinterType, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
 import * as Print from 'expo-print';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, findNodeHandle, Platform, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
@@ -30,6 +30,7 @@ export default function SettingsScreen() {
   const [shopName, setShopNameState] = useState('');
   const [printMargin, setPrintMarginState] = useState<number>(8);
   const [printCopies, setPrintCopiesState] = useState<number>(1);
+  const [printerType, setPrinterTypeState] = useState<PrinterType>('pos');
   const [autoPrinter, setAutoPrinterState] = useState(false);
   const [autoSave, setAutoSaveState] = useState(false);
   const [imageOptimization, setImageOptimizationState] = useState(false);
@@ -106,10 +107,11 @@ export default function SettingsScreen() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [name, margin, copies, auto, save, imgOpt, imgOptQuality, imgOptResize, mode, tpl, savedMac] = await Promise.all([
+        const [name, margin, copies, printerTypeValue, auto, save, imgOpt, imgOptQuality, imgOptResize, mode, tpl, savedMac] = await Promise.all([
           getShopName(),
           getPrintMargin(),
           getPrintCopies(),
+          getPrinterType(),
           getAutoPrinter(),
           getAutoSave(),
           getImageOptimization(),
@@ -122,6 +124,7 @@ export default function SettingsScreen() {
         setShopNameState(name);
         setPrintMarginState(margin);
         setPrintCopiesState(copies);
+        setPrinterTypeState(printerTypeValue);
         setAutoPrinterState(auto);
         setAutoSaveState(save);
         setImageOptimizationState(imgOpt);
@@ -173,6 +176,23 @@ export default function SettingsScreen() {
     const copies = isNaN(n) || n < 1 ? 1 : Math.max(1, Math.min(10, n));
     setPrintCopiesState(copies);
     await setPrintCopies(copies);
+  };
+
+  const handleIncrementCopies = async () => {
+    const newValue = Math.min(10, printCopies + 1);
+    setPrintCopiesState(newValue);
+    await setPrintCopies(newValue);
+  };
+
+  const handleDecrementCopies = async () => {
+    const newValue = Math.max(1, printCopies - 1);
+    setPrintCopiesState(newValue);
+    await setPrintCopies(newValue);
+  };
+
+  const handleTogglePrinterType = async (value: PrinterType) => {
+    setPrinterTypeState(value);
+    await setPrinterType(value);
   };
 
   const handleToggleAuto = async (value: boolean) => {
@@ -377,11 +397,16 @@ export default function SettingsScreen() {
         width: 80, // 80mm paper width
       });
       
-      // Send data to printer
-      await printer.sendData();
+      // Add cut before sending data
+      try {
+        await printer.addCut();
+      } catch (cutError: any) {
+        console.warn('Cut command failed (continuing anyway):', cutError);
+        // Continue without cut if it fails
+      }
       
-      // Add cut
-      await printer.addCut();
+      // Send data to printer (includes cut command)
+      await printer.sendData();
       
       // Disconnect
       await printer.disconnect();
@@ -544,16 +569,22 @@ export default function SettingsScreen() {
       await printer.addText('========================\n');
       await printer.addFeedLine(1);
       
-      // Step 6: Send data to printer
+      // Step 6: Add cut before sending data
+      step = 'adding paper cut';
+      console.log(`[TEST PRINT] Step: ${step}`);
+      try {
+        await printer.addCut();
+        console.log(`[TEST PRINT] Cut command added successfully`);
+      } catch (cutError: any) {
+        console.warn(`[TEST PRINT] Cut command failed (continuing anyway):`, cutError);
+        // Continue without cut if it fails
+      }
+      
+      // Step 7: Send data to printer (includes cut command)
       step = 'sending data to printer';
       console.log(`[TEST PRINT] Step: ${step}`);
       await printer.sendData();
       console.log(`[TEST PRINT] Data sent successfully`);
-      
-      // Step 7: Add cut
-      step = 'adding paper cut';
-      console.log(`[TEST PRINT] Step: ${step}`);
-      await printer.addCut();
       
       // Step 8: Disconnect
       step = 'disconnecting from printer';
@@ -637,7 +668,7 @@ export default function SettingsScreen() {
       <ScrollView 
         contentContainerStyle={[
           styles.content,
-          { paddingTop: Platform.OS === 'ios' ? Math.max(insets.top + 8, 24) : 24 }
+          { paddingTop: Platform.OS === 'ios' ? Math.max(insets.top + 24, 48) : 48 }
         ]}
       >
         <ThemedText type="title" style={styles.title}>Settings</ThemedText>
@@ -771,14 +802,79 @@ export default function SettingsScreen() {
           />
 
           <ThemedText style={[styles.label, { marginTop: 16 }]}>Print Copies</ThemedText>
-          <TextInput
-            keyboardType="numeric"
-            value={String(printCopies)}
-            onChangeText={(t) => setPrintCopiesState(t === '' ? 1 : parseInt(t, 10) || 1)}
-            onBlur={() => handleSavePrintCopies(String(printCopies))}
-            style={styles.input}
-          />
-          <ThemedText style={[styles.previewHint, { marginTop: 4 }]}>Number of copies to print (1-10). Applies to auto-print too.</ThemedText>
+          <View style={styles.copiesControl}>
+            <TouchableOpacity
+              onPress={handleDecrementCopies}
+              disabled={printCopies <= 1}
+              style={[
+                styles.copiesButton,
+                { backgroundColor: Colors[colorScheme ?? 'light'].tint + '20' },
+                printCopies <= 1 && styles.copiesButtonDisabled
+              ]}
+            >
+              <IconSymbol 
+                name="minus" 
+                size={20} 
+                color={printCopies <= 1 ? '#999' : Colors[colorScheme ?? 'light'].tint} 
+              />
+            </TouchableOpacity>
+            <View style={[styles.copiesValue, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '10' }]}>
+              <ThemedText style={[styles.copiesValueText, { color: Colors[colorScheme ?? 'light'].tint }]}>
+                {printCopies}
+              </ThemedText>
+            </View>
+            <TouchableOpacity
+              onPress={handleIncrementCopies}
+              disabled={printCopies >= 10}
+              style={[
+                styles.copiesButton,
+                { backgroundColor: Colors[colorScheme ?? 'light'].tint + '20' },
+                printCopies >= 10 && styles.copiesButtonDisabled
+              ]}
+            >
+              <IconSymbol 
+                name="plus" 
+                size={20} 
+                color={printCopies >= 10 ? '#999' : Colors[colorScheme ?? 'light'].tint} 
+              />
+            </TouchableOpacity>
+          </View>
+          <ThemedText style={[styles.previewHint, { marginTop: 4 }]}>Number of copies to print (1-10). Only applies to auto-print. Manual prints always print 1 copy.</ThemedText>
+
+          <ThemedText style={[styles.label, { marginTop: 16 }]}>Printer Type</ThemedText>
+          <View style={styles.rowBetween}>
+            <TouchableOpacity
+              onPress={() => handleTogglePrinterType('system')}
+              style={[
+                styles.printerTypeButton,
+                printerType === 'system' && styles.printerTypeButtonActive,
+                { borderColor: Colors[colorScheme ?? 'light'].tint }
+              ]}
+            >
+              <ThemedText style={[
+                styles.printerTypeButtonText,
+                printerType === 'system' && styles.printerTypeButtonTextActive
+              ]}>
+                System Printer
+              </ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleTogglePrinterType('pos')}
+              style={[
+                styles.printerTypeButton,
+                printerType === 'pos' && styles.printerTypeButtonActive,
+                { borderColor: Colors[colorScheme ?? 'light'].tint }
+              ]}
+            >
+              <ThemedText style={[
+                styles.printerTypeButtonText,
+                printerType === 'pos' && styles.printerTypeButtonTextActive
+              ]}>
+                POS Printer
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+          <ThemedText style={[styles.previewHint, { marginTop: 4 }]}>Choose which printer button to show on receipt page</ThemedText>
         </View>
 
         {/* Templates */}
@@ -823,29 +919,69 @@ export default function SettingsScreen() {
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
               <TouchableOpacity 
                 onPress={handlePreviewPrint} 
-                style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '20', flex: 1 }]}
+                style={[
+                  styles.button, 
+                  { 
+                    backgroundColor: colorScheme === 'dark' 
+                      ? 'rgba(255, 255, 255, 0.1)' 
+                      : Colors[colorScheme ?? 'light'].tint + '20',
+                    flex: 1 
+                  }
+                ]}
                 disabled={isPrinting}
               >
                 <IconSymbol 
                   name="printer.fill" 
                   size={18} 
-                  color={isPrinting ? '#999' : Colors[colorScheme ?? 'light'].tint} 
+                  color={isPrinting ? '#999' : (colorScheme === 'dark' ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].tint)} 
                 />
-                <ThemedText style={[styles.buttonText, { color: isPrinting ? '#999' : Colors[colorScheme ?? 'light'].tint, marginLeft: 6 }]}>
+                <ThemedText 
+                  style={[
+                    styles.buttonText, 
+                    { 
+                      color: isPrinting 
+                        ? '#999' 
+                        : colorScheme === 'dark' 
+                          ? Colors[colorScheme ?? 'light'].tint 
+                          : Colors[colorScheme ?? 'light'].tint,
+                      marginLeft: 6 
+                    }
+                  ]}
+                >
                   {isPrinting ? 'Printing...' : 'Test Print'}
                 </ThemedText>
               </TouchableOpacity>
               <TouchableOpacity 
                 onPress={handlePreviewEpsonPrint} 
-                style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '20', flex: 1 }]}
+                style={[
+                  styles.button, 
+                  { 
+                    backgroundColor: colorScheme === 'dark' 
+                      ? 'rgba(255, 255, 255, 0.1)' 
+                      : Colors[colorScheme ?? 'light'].tint + '20',
+                    flex: 1 
+                  }
+                ]}
                 disabled={isEpsonPrinting}
               >
                 <IconSymbol 
-                  name="antenna.radiowaves.left.and.right" 
+                  name="printer.fill" 
                   size={18} 
-                  color={isEpsonPrinting ? '#999' : Colors[colorScheme ?? 'light'].tint} 
+                  color={isEpsonPrinting ? '#999' : (colorScheme === 'dark' ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].tint)} 
                 />
-                <ThemedText style={[styles.buttonText, { color: isEpsonPrinting ? '#999' : Colors[colorScheme ?? 'light'].tint, marginLeft: 6 }]}>
+                <ThemedText 
+                  style={[
+                    styles.buttonText, 
+                    { 
+                      color: isEpsonPrinting 
+                        ? '#999' 
+                        : colorScheme === 'dark' 
+                          ? Colors[colorScheme ?? 'light'].tint 
+                          : Colors[colorScheme ?? 'light'].tint,
+                      marginLeft: 6 
+                    }
+                  ]}
+                >
                   {isEpsonPrinting ? 'Printing...' : 'Test Epson'}
                 </ThemedText>
               </TouchableOpacity>
@@ -934,15 +1070,31 @@ export default function SettingsScreen() {
               {/* Simple Test Print Button */}
               <TouchableOpacity 
                 onPress={handleSimpleTestPrint} 
-                style={[styles.button, { backgroundColor: Colors[colorScheme ?? 'light'].tint, marginTop: 12 }]}
+                style={[
+                  styles.button, 
+                  { 
+                    backgroundColor: colorScheme === 'dark' 
+                      ? 'rgba(255, 255, 255, 0.2)' 
+                      : Colors[colorScheme ?? 'light'].tint,
+                    marginTop: 12 
+                  }
+                ]}
                 disabled={isTestPrinting}
               >
                 <IconSymbol 
                   name="checkmark.circle.fill" 
                   size={18} 
-                  color="#fff" 
+                  color={colorScheme === 'dark' ? Colors[colorScheme ?? 'light'].tint : '#fff'} 
                 />
-                <ThemedText style={[styles.buttonText, { color: '#fff', marginLeft: 6 }]}>
+                <ThemedText 
+                  style={[
+                    styles.buttonText, 
+                    { 
+                      color: colorScheme === 'dark' ? Colors[colorScheme ?? 'light'].tint : '#fff',
+                      marginLeft: 6 
+                    }
+                  ]}
+                >
                   {isTestPrinting ? 'Printing Test...' : 'Simple Test Print (Text Only)'}
                 </ThemedText>
               </TouchableOpacity>
@@ -1102,6 +1254,59 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'monospace',
     opacity: 0.8,
+  },
+  copiesControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 8,
+  },
+  copiesButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(10, 126, 164, 0.3)',
+  },
+  copiesButtonDisabled: {
+    opacity: 0.5,
+  },
+  copiesValue: {
+    minWidth: 60,
+    height: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(10, 126, 164, 0.3)',
+  },
+  copiesValueText: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  printerTypeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 4,
+  },
+  printerTypeButtonActive: {
+    backgroundColor: '#0a7ea4',
+  },
+  printerTypeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0a7ea4',
+  },
+  printerTypeButtonTextActive: {
+    color: '#fff',
   },
 });
 

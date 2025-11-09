@@ -11,9 +11,12 @@ const IMAGE_OPTIMIZATION_KEY = '@snap_receipt:image_optimization';
 const IMAGE_OPTIMIZATION_QUALITY_KEY = '@snap_receipt:image_optimization_quality';
 const IMAGE_OPTIMIZATION_RESIZE_WIDTH_KEY = '@snap_receipt:image_optimization_resize_width';
 const PRINT_COPIES_KEY = '@snap_receipt:print_copies';
+const PRINTER_TYPE_KEY = '@snap_receipt:printer_type';
+const CAMERA_ZOOM_KEY = '@snap_receipt:camera_zoom';
 
 export type OCRMode = 'vision' | 'generative';
 export type PrintTemplateId = 'classic' | 'compact' | 'kitchen';
+export type PrinterType = 'system' | 'pos';
 
 /**
  * Get the current OCR mode preference
@@ -287,6 +290,64 @@ export async function setPrintCopies(copies: number): Promise<void> {
     await AsyncStorage.setItem(PRINT_COPIES_KEY, String(clamped));
   } catch (error) {
     console.error('Error setting print copies:', error);
+  }
+}
+
+/**
+ * Get the printer type preference (system or POS)
+ */
+export async function getPrinterType(): Promise<PrinterType> {
+  try {
+    const value = await AsyncStorage.getItem(PRINTER_TYPE_KEY);
+    if (value === 'system' || value === 'pos') {
+      return value as PrinterType;
+    }
+    return 'pos'; // Default to POS printer
+  } catch (error) {
+    console.error('Error getting printer type:', error);
+    return 'pos';
+  }
+}
+
+/**
+ * Set the printer type preference
+ */
+export async function setPrinterType(type: PrinterType): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PRINTER_TYPE_KEY, type);
+  } catch (error) {
+    console.error('Error setting printer type:', error);
+  }
+}
+
+/**
+ * Get the camera zoom level preference
+ */
+export async function getCameraZoom(): Promise<number> {
+  try {
+    const value = await AsyncStorage.getItem(CAMERA_ZOOM_KEY);
+    if (value !== null) {
+      const parsed = parseFloat(value);
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) {
+        return parsed;
+      }
+    }
+    return 0.75; // Default to 0.75
+  } catch (error) {
+    console.error('Error getting camera zoom:', error);
+    return 0.75;
+  }
+}
+
+/**
+ * Set the camera zoom level preference
+ */
+export async function setCameraZoom(zoom: number): Promise<void> {
+  try {
+    const clamped = Math.max(0, Math.min(1, zoom));
+    await AsyncStorage.setItem(CAMERA_ZOOM_KEY, String(clamped));
+  } catch (error) {
+    console.error('Error setting camera zoom:', error);
   }
 }
 

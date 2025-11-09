@@ -5,7 +5,7 @@ import { useThemeColor } from '@/hooks/use-theme-color';
 import { getLocalDateString, initDatabase, saveReceipt } from '@/utils/database';
 import { ReceiptData } from '@/utils/ocr';
 import { calculateTotals, formatDateTime, printReceiptAsText } from '@/utils/printer';
-import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getPrintCopies, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
+import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getPrintCopies, getPrintMargin, getPrintTemplate, getPrinterType, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -72,6 +72,7 @@ export default function ReceiptScreen() {
   const [shopName, setShopName] = useState<string>('');
   const [printMargin, setPrintMargin] = useState<number>(8);
   const [template, setTemplate] = useState<PrintTemplateId>('classic');
+  const [printerType, setPrinterType] = useState<'system' | 'pos'>('pos');
   const [showImage, setShowImage] = useState(false);
   const insets = useSafeAreaInsets();
 
@@ -88,14 +89,16 @@ export default function ReceiptScreen() {
   useEffect(() => {
     const loadPrefs = async () => {
       try {
-        const [name, margin, tpl] = await Promise.all([
+        const [name, margin, tpl, printerTypeValue] = await Promise.all([
           getShopName(),
           getPrintMargin(),
           getPrintTemplate(),
+          getPrinterType(),
         ]);
         setShopName(name);
         setPrintMargin(margin);
         setTemplate(tpl);
+        setPrinterType(printerTypeValue);
         
         // Initialize database
         await initDatabase();
@@ -127,7 +130,7 @@ export default function ReceiptScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleEpsonPrint = async () => {
+  const handleEpsonPrint = async (isAutoPrint: boolean = false) => {
     let target: string | null = null;
     let deviceName: string = 'Printer';
     let step = 'initialization';
@@ -218,9 +221,9 @@ export default function ReceiptScreen() {
         throw new Error('Invalid printer target');
       }
       
-      // Get number of copies to print
-      const printCopies = await getPrintCopies();
-      console.log(`[RECEIPT PRINT] Printing ${printCopies} copy/copies`);
+      // Get number of copies to print (only for auto-print, manual always prints 1 copy)
+      const printCopies = isAutoPrint ? await getPrintCopies() : 1;
+      console.log(`[RECEIPT PRINT] Printing ${printCopies} copy/copies (${isAutoPrint ? 'auto-print' : 'manual'})`);
       
       // Step 4: Create printer instance
       step = 'creating printer instance';
@@ -288,28 +291,28 @@ export default function ReceiptScreen() {
           console.log(`[RECEIPT PRINT] Receipt printed manually as text`);
         }
         
+        // Step 7: Add paper cut command after each copy
+        step = 'adding paper cut';
+        console.log(`[RECEIPT PRINT] Step: ${step} (copy ${copy} of ${printCopies})`);
+        try {
+          await printer.addCut();
+          console.log(`[RECEIPT PRINT] Paper cut command added for copy ${copy}`);
+        } catch (cutError: any) {
+          console.warn(`[RECEIPT PRINT] Paper cut command failed (continuing anyway):`, cutError);
+          // Continue even if cut fails - some printers handle it differently
+        }
+        
+        // Step 8: Send data to printer after each copy (includes cut command)
+        step = 'sending data to printer';
+        console.log(`[RECEIPT PRINT] Step: ${step} (copy ${copy} of ${printCopies})`);
+        await printer.sendData();
+        console.log(`[RECEIPT PRINT] Data sent successfully for copy ${copy}`);
+        
         // Add feed line between copies (except after last copy)
         if (copy < printCopies) {
           await printer.addFeedLine(2);
         }
       }
-      
-      // Step 7: Add paper cut command (before sending data) - only on last copy
-      step = 'adding paper cut';
-      console.log(`[RECEIPT PRINT] Step: ${step}`);
-      try {
-        await printer.addCut();
-        console.log(`[RECEIPT PRINT] Paper cut command added`);
-      } catch (cutError: any) {
-        console.warn(`[RECEIPT PRINT] Paper cut command failed (continuing anyway):`, cutError);
-        // Continue even if cut fails - some printers handle it differently
-      }
-      
-      // Step 8: Send data to printer (includes cut command)
-      step = 'sending data to printer';
-      console.log(`[RECEIPT PRINT] Step: ${step}`);
-      await printer.sendData();
-      console.log(`[RECEIPT PRINT] Data sent successfully`);
       
       // Step 9: Disconnect
       step = 'disconnecting from printer';
@@ -455,17 +458,38 @@ export default function ReceiptScreen() {
           }
         }
         
-        // Capture view and add to print buffer
-        await Printer.addViewShot(printer, {
-          viewNode: viewTag,
-          width: 80, // 80mm paper width
-        });
+        // Get number of copies to print
+        const printCopies = await getPrintCopies();
+        console.log(`Printing ${printCopies} copy/copies to printer: ${validDeviceName}`);
         
-        // Send data to printer
-        await printer.sendData();
-        
-        // Add cut
-        await printer.addCut();
+        // Print multiple copies
+        for (let copy = 1; copy <= printCopies; copy++) {
+          if (printCopies > 1) {
+            console.log(`Printing copy ${copy} of ${printCopies} to printer: ${validDeviceName}`);
+          }
+          
+          // Capture view and add to print buffer
+          await Printer.addViewShot(printer, {
+            viewNode: viewTag,
+            width: 80, // 80mm paper width
+          });
+          
+          // Add cut after each copy
+          try {
+            await printer.addCut();
+            console.log(`Cut command added for copy ${copy}`);
+          } catch (cutError: any) {
+            console.warn(`Cut command failed (continuing anyway):`, cutError);
+          }
+          
+          // Send data to printer (includes cut command)
+          await printer.sendData();
+          
+          // Add feed line between copies (except after last copy)
+          if (copy < printCopies) {
+            await printer.addFeedLine(2);
+          }
+        }
         
         // Disconnect
         await printer.disconnect();
@@ -958,7 +982,7 @@ export default function ReceiptScreen() {
           // Small delay to ensure view is rendered
           setTimeout(async () => {
             try {
-              await handleEpsonPrint();
+              await handleEpsonPrint(true); // Pass true for auto-print
             } catch (e) {
               console.error('Auto-print error:', e);
               // Error message is already shown in handleEpsonPrint
@@ -1334,7 +1358,7 @@ export default function ReceiptScreen() {
         { 
           backgroundColor, 
           borderBottomColor: borderColor,
-          paddingTop: Platform.OS === 'android' ? Math.max(insets.top, 16) : 60,
+          paddingTop: Platform.OS === 'android' ? Math.max(insets.top + 16, 32) : Math.max(insets.top + 16, 80),
         }
       ]}>
         <TouchableOpacity 
@@ -1358,30 +1382,33 @@ export default function ReceiptScreen() {
               color={isSaved || isExistingReceipt ? '#4CAF50' : (isSaving ? secondaryText : tintColor)} 
             />
           </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={handlePrint} 
-            style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
-            disabled={isPrinting}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <IconSymbol 
-              name="printer.fill" 
-              size={24} 
-              color={isPrinting ? secondaryText : tintColor} 
-            />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={handleEpsonPrint} 
-            style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
-            disabled={isEpsonPrinting}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <IconSymbol 
-              name="antenna.radiowaves.left.and.right" 
-              size={24} 
-              color={isEpsonPrinting ? tintColor + '80' : tintColor} 
-            />
-          </TouchableOpacity>
+          {printerType === 'system' ? (
+            <TouchableOpacity 
+              onPress={handlePrint} 
+              style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
+              disabled={isPrinting}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <IconSymbol 
+                name="printer.fill" 
+                size={24} 
+                color={isPrinting ? secondaryText : tintColor} 
+              />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              onPress={() => handleEpsonPrint(false)} 
+              style={[styles.printButton, { backgroundColor: tintColor + '20' }]}
+              disabled={isEpsonPrinting}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <IconSymbol 
+                name="printer.fill" 
+                size={24} 
+                color={isEpsonPrinting ? tintColor + '80' : tintColor} 
+              />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -1652,27 +1679,25 @@ export default function ReceiptScreen() {
                     </>
                   );
                 })()}
+                
+                {/* Simple Test Print Button */}
+                <TouchableOpacity 
+                  onPress={handleSimpleTestPrint} 
+                  style={[styles.printToAllButton, { backgroundColor: tintColor, borderColor: tintColor, marginTop: 12 }]}
+                  disabled={isTestPrinting}
+                >
+                  <IconSymbol 
+                    name="checkmark.circle.fill" 
+                    size={20} 
+                    color="#fff" 
+                  />
+                  <ThemedText style={styles.printToAllButtonText}>
+                    {isTestPrinting ? 'Printing Test...' : 'Simple Test Print (Text Only)'}
+                  </ThemedText>
+                </TouchableOpacity>
               </View>
             )}
           </View>
-        )}
-
-        {/* Simple Test Print Button */}
-        {printers && printers.length > 0 && (
-          <TouchableOpacity 
-            onPress={handleSimpleTestPrint} 
-            style={[styles.printToAllButton, { backgroundColor: tintColor, borderColor: tintColor, marginTop: 12 }]}
-            disabled={isTestPrinting}
-          >
-            <IconSymbol 
-              name="checkmark.circle.fill" 
-              size={20} 
-              color="#fff" 
-            />
-            <ThemedText style={styles.printToAllButtonText}>
-              {isTestPrinting ? 'Printing Test...' : 'Simple Test Print (Text Only)'}
-            </ThemedText>
-          </TouchableOpacity>
         )}
 
         {/* Print to All Printers Button - Show when multiple printers are found */}
@@ -1683,7 +1708,7 @@ export default function ReceiptScreen() {
             disabled={isPrintingToAll}
           >
             <IconSymbol 
-              name="antenna.radiowaves.left.and.right" 
+              name="printer.fill" 
               size={20} 
               color="#fff" 
             />

@@ -174,7 +174,7 @@ export default function OrdersScreen() {
         { 
           backgroundColor, 
           borderBottomColor: borderColor,
-          paddingTop: Platform.OS === 'android' ? Math.max(insets.top, 16) : 60,
+          paddingTop: Platform.OS === 'android' ? Math.max(insets.top + 16, 32) : Math.max(insets.top + 16, 80),
         }
       ]}>
         <TouchableOpacity 

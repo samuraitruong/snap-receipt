@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { extractTextFromImageWithMode } from '@/utils/ocr';
 import { getCurrentOrderNumber, getNextOrderNumber } from '@/utils/orderNumber';
-import { getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode } from '@/utils/settings';
+import { getCameraZoom, getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode, setCameraZoom } from '@/utils/settings';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -27,20 +27,24 @@ export default function CaptureScreen() {
   const [image, setImage] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [currentOrderNumber, setCurrentOrderNumber] = useState<number | null>(null);
-  const [zoom, setZoom] = useState(0);
+  const [zoom, setZoom] = useState(0.75); // Default to 0.75 (normalized 0-1 value)
   const cameraRef = useRef<CameraView>(null);
 
-  // Load current order number on mount
+  // Load current order number and camera zoom on mount
   useEffect(() => {
-    const loadCurrentOrderNumber = async () => {
+    const loadSettings = async () => {
       try {
-        const orderNum = await getCurrentOrderNumber();
+        const [orderNum, savedZoom] = await Promise.all([
+          getCurrentOrderNumber(),
+          getCameraZoom(),
+        ]);
         setCurrentOrderNumber(orderNum);
+        setZoom(savedZoom);
       } catch (error) {
-        console.error('Error loading current order number:', error);
+        console.error('Error loading settings:', error);
       }
     };
-    loadCurrentOrderNumber();
+    loadSettings();
   }, []);
 
   if (!permission) {
@@ -66,9 +70,35 @@ export default function CaptureScreen() {
     );
   }
 
+  // expo-camera's zoom property typically ranges from 0 to 1+:
+  // - 0 = minimum zoom (widest field of view) - if supported by device
+  // - 1.0 = default/normal view
+  // - 1+ = maximum zoom (zoomed in)
+  // However, many devices don't support zoom < 1.0 (zooming out beyond default)
+  // We'll use zoom directly: 0 = widest (if supported), 1.0 = normal, 1+ = zoomed in
+  // For devices that don't support < 1.0, we'll use 1.0 as minimum
   const clampZoom = (z: number) => Math.max(0, Math.min(1, z));
-  const increaseZoom = () => setZoom(prev => clampZoom(prev + 0.1));
-  const decreaseZoom = () => setZoom(prev => clampZoom(prev - 0.1));
+  
+  // Use zoom value directly - expo-camera should handle it
+  // If device doesn't support < 1.0, it will clamp to 1.0 minimum
+  const getActualZoom = (normalizedZoom: number): number => {
+    // Use normalized value directly - expo-camera will handle the actual range
+    // 0 = widest (if supported), 0.75 = slightly zoomed out (if supported), 1.0 = normal
+    return normalizedZoom;
+  };
+  
+  const updateZoom = async (newZoom: number) => {
+    const clamped = clampZoom(newZoom);
+    setZoom(clamped);
+    // Save zoom level to settings (normalized 0-1)
+    try {
+      await setCameraZoom(clamped);
+    } catch (error) {
+      console.error('Error saving camera zoom:', error);
+    }
+  };
+  const increaseZoom = () => updateZoom(zoom + 0.1);
+  const decreaseZoom = () => updateZoom(zoom - 0.1);
 
   const takePicture = async () => {
     if (cameraRef.current) {
@@ -325,7 +355,7 @@ export default function CaptureScreen() {
         style={styles.camera}
         facing={facing}
         mode="picture"
-        zoom={zoom}
+        zoom={getActualZoom(zoom)}
       >
         <View style={styles.overlay}>
           {/* Scan Frame at Top */}

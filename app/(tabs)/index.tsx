@@ -51,7 +51,7 @@ export default function HomeScreen() {
       <ScrollView 
         contentContainerStyle={[
           styles.content,
-          { paddingTop: Platform.OS === 'ios' ? Math.max(insets.top + 8, 24) : 24 }
+          { paddingTop: Platform.OS === 'ios' ? Math.max(insets.top + 24, 48) : 48 }
         ]}
       >
         <View style={styles.header}>
