@@ -18,6 +18,7 @@ const MAPPING = {
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  'chevron.down': 'keyboard-arrow-down',
   'camera.fill': 'camera-alt',
   'gearshape.fill': 'settings',
   'photo.fill': 'photo-library',
@@ -33,6 +34,9 @@ const MAPPING = {
   'square.and.arrow.down.fill': 'save',
   'checkmark.circle.fill': 'check-circle',
   'calendar': 'calendar-today',
+  'antenna.radiowaves.left.and.right': 'bluetooth-connected',
+  'eye.fill': 'visibility',
+  'eye.slash.fill': 'visibility-off',
 } as IconMapping;
 
 /**

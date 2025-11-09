@@ -4,12 +4,13 @@ import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
 import { getLocalDateString, initDatabase, saveReceipt } from '@/utils/database';
 import { ReceiptData } from '@/utils/ocr';
-import { getAutoSave, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
+import { calculateTotals, formatDateTime, printReceiptAsText } from '@/utils/printer';
+import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getPrintCopies, getPrintMargin, getPrintTemplate, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, NativeModules, Platform, ScrollView, StyleSheet, TouchableOpacity, View, findNodeHandle } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View, findNodeHandle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ReceiptScreen() {
@@ -22,11 +23,16 @@ export default function ReceiptScreen() {
   const isExistingReceipt = params.isExistingReceipt === 'true' || (Array.isArray(params.isExistingReceipt) && params.isExistingReceipt[0] === 'true');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isEpsonPrinting, setIsEpsonPrinting] = useState(false);
+  const [isPrintingToAll, setIsPrintingToAll] = useState(false);
+  const [isTestPrinting, setIsTestPrinting] = useState(false);
+  const [showDebugInfo, setShowDebugInfo] = useState(false);
   const printViewRef = useRef<View>(null);
+  const autoPrintAttemptedRef = useRef(false);
 
   // Optional discovery hook wrapper: use library hook when available, else no-op
   let useDiscovery: () => { start: (params?: any) => void; isDiscovering: boolean; printers: any[] };
   let DiscoveryPortType: any = null;
+  let PrinterConstants: any = null;
   let moduleAvailable = false;
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -38,6 +44,10 @@ export default function ReceiptScreen() {
         DiscoveryPortType = mod.DiscoveryPortType;
       } else if (mod.DiscoveryFilterOption) {
         DiscoveryPortType = mod.DiscoveryFilterOption;
+      }
+      // Get PrinterConstants for alignment constants
+      if (mod.PrinterConstants) {
+        PrinterConstants = mod.PrinterConstants;
       }
       moduleAvailable = true;
       console.log('Epson module loaded successfully');
@@ -94,6 +104,8 @@ export default function ReceiptScreen() {
       }
     };
     loadPrefs();
+    // Reset auto-print flag when receipt screen loads
+    autoPrintAttemptedRef.current = false;
   }, []);
 
   // Start discovery for test printing to first printer - search for both Bluetooth and WiFi/LAN printers
@@ -116,10 +128,41 @@ export default function ReceiptScreen() {
   }, []);
 
   const handleEpsonPrint = async () => {
+    let target: string | null = null;
+    let deviceName: string = 'Printer';
+    let step = 'initialization';
+    
     try {
-      // Check if printers are available from the hook
-      const target = printers && printers.length > 0 && printers[0]?.target;
+      // Step 1: Get saved default printer first, then fall back to discovered printers
+      step = 'finding printer';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
+      const savedPrinterMac = await getEpsonPrinterMac();
+      
+      // Prefer saved default printer if available
+      if (savedPrinterMac) {
+        // Check if saved printer is in the discovered list
+        const savedPrinter = printers?.find(p => p.target === savedPrinterMac);
+        if (savedPrinter) {
+          target = savedPrinterMac;
+          deviceName = savedPrinter.deviceName || savedPrinter.name || 'Printer';
+          console.log(`[RECEIPT PRINT] Using saved default printer: ${deviceName} (target: ${target})`);
+        } else {
+          // Saved printer not found in discovery, but try to use it anyway
+          target = savedPrinterMac;
+          deviceName = 'Printer';
+          console.log(`[RECEIPT PRINT] Using saved default printer (not in discovery list): ${target}`);
+        }
+      }
+      
+      // Fall back to first discovered printer if no default is set
+      if (!target && printers && printers.length > 0) {
+        target = printers[0]?.target;
+        deviceName = printers[0]?.deviceName || printers[0]?.name || 'Printer';
+        console.log(`[RECEIPT PRINT] Using first discovered printer: ${deviceName} (target: ${target})`);
+      }
+      
       if (!target) {
+        console.error('[RECEIPT PRINT] No printer target found');
         Alert.alert(
           'No Printers Found',
           'No printers were discovered. Make sure:\n\n1. Bluetooth/WiFi is enabled on your device\n2. The printer is powered on\n3. For Bluetooth: printer is in pairing/discovery mode and within range\n4. For WiFi/LAN: printer is on the same network\n\nDiscovery runs automatically in the background.'
@@ -127,21 +170,22 @@ export default function ReceiptScreen() {
         return;
       }
 
-      // Try to load the module
-      let EpsonModule: any = null;
+      // Step 2: Try to load the module
+      step = 'loading printer module';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
+      let Printer: any = null;
+      let PrinterConstants: any = null;
       try {
         const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
-        EpsonModule = mod?.EscPosPrinter;
+        Printer = mod?.Printer;
+        PrinterConstants = mod?.PrinterConstants;
+        console.log(`[RECEIPT PRINT] Module loaded: Printer=${!!Printer}, PrinterConstants=${!!PrinterConstants}`);
       } catch (e) {
-        console.error('Failed to import Epson module:', e);
+        console.error('[RECEIPT PRINT] Failed to import Epson module:', e);
       }
 
-      // Also try checking NativeModules (for release builds)
-      if (!EpsonModule && NativeModules && 'EscPosPrinter' in NativeModules) {
-        EpsonModule = NativeModules.EscPosPrinter;
-      }
-
-      if (!EpsonModule) {
+      if (!Printer) {
+        console.error('[RECEIPT PRINT] Printer module not found');
         Alert.alert(
           'Printer Module Not Found', 
           'The Epson printer module is not included in this build. Make sure you:\n\n1. Installed react-native-esc-pos-printer\n2. Rebuilt the app with npx expo run:android\n3. Not using Expo Go (use a development build)'
@@ -149,41 +193,580 @@ export default function ReceiptScreen() {
         return;
       }
 
+      // Step 3: Get view tag
+      step = 'getting view tag';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
       const viewTag = findNodeHandle(printViewRef.current);
       if (!viewTag) {
-        Alert.alert('Printer', 'Printable view not ready.');
+        console.error('[RECEIPT PRINT] View tag not found - printable view not ready');
+        Alert.alert('Printer', 'Printable view not ready. Please wait a moment and try again.');
+        return;
+      }
+      console.log(`[RECEIPT PRINT] View tag obtained: ${viewTag}`);
+
+      setIsEpsonPrinting(true);
+      const printerInfo = printers?.find(p => p.target === target);
+      const printerDeviceName = printerInfo?.deviceName || printerInfo?.name || deviceName;
+      
+      // Ensure deviceName is a valid non-empty string
+      const validDeviceName = printerDeviceName && printerDeviceName.trim() !== '' ? printerDeviceName.trim() : 'Printer';
+      console.log(`[RECEIPT PRINT] Starting print to printer: ${validDeviceName} (target: ${target})`);
+      console.log('[RECEIPT PRINT] Full printer info:', JSON.stringify(printerInfo, null, 2));
+      
+      // Validate target
+      if (!target || target.trim() === '') {
+        throw new Error('Invalid printer target');
+      }
+      
+      // Get number of copies to print
+      const printCopies = await getPrintCopies();
+      console.log(`[RECEIPT PRINT] Printing ${printCopies} copy/copies`);
+      
+      // Step 4: Create printer instance
+      step = 'creating printer instance';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
+      const printer = new Printer({
+        target: target.trim(),
+        deviceName: validDeviceName,
+      });
+      console.log(`[RECEIPT PRINT] Printer instance created successfully`);
+      
+      // Step 5: Connect to printer
+      step = 'connecting to printer';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
+      try {
+        await printer.connect(5000); // 5 second timeout
+        console.log(`[RECEIPT PRINT] Connected with timeout parameter`);
+      } catch (connectError: any) {
+        console.log(`[RECEIPT PRINT] Connect with timeout failed:`, connectError);
+        // If connect with timeout fails, try without timeout
+        if (connectError?.message?.includes('parameter') || connectError?.message?.includes('invalid')) {
+          console.log('[RECEIPT PRINT] Retrying connect without timeout parameter');
+          await printer.connect();
+          console.log(`[RECEIPT PRINT] Connected without timeout parameter`);
+        } else {
+          throw connectError;
+        }
+      }
+      
+      // Print multiple copies
+      for (let copy = 1; copy <= printCopies; copy++) {
+        if (printCopies > 1) {
+          console.log(`[RECEIPT PRINT] Printing copy ${copy} of ${printCopies}`);
+        }
+        
+        // Step 6: Try to capture view and add to print buffer, fallback to manual text if it fails
+        step = 'capturing view and adding to print buffer';
+        console.log(`[RECEIPT PRINT] Step: ${step}`);
+        console.log(`[RECEIPT PRINT] View tag: ${viewTag}, Width: 80mm`);
+        
+        let useManualTextPrint = false;
+        try {
+          await Printer.addViewShot(printer, {
+            viewNode: viewTag,
+            width: 80, // 80mm paper width
+          });
+          console.log(`[RECEIPT PRINT] View captured and added to print buffer`);
+        } catch (viewShotError: any) {
+          console.warn(`[RECEIPT PRINT] addViewShot failed:`, viewShotError);
+          const errorMsg = viewShotError?.message || String(viewShotError) || '';
+          // If it's an invalid parameter error (common with WiFi/LAN printers), use manual text printing
+          if (errorMsg.includes('invalid parameter') || errorMsg.includes('invalid') || errorMsg.includes('parameter')) {
+            console.log(`[RECEIPT PRINT] Falling back to manual text printing (addViewShot not supported for this printer type)`);
+            useManualTextPrint = true;
+          } else {
+            // Re-throw if it's a different error
+            throw viewShotError;
+          }
+        }
+        
+        // If addViewShot failed, use manual text printing
+        if (useManualTextPrint) {
+          step = 'printing receipt manually as text';
+          console.log(`[RECEIPT PRINT] Step: ${step}`);
+          await printReceiptAsText(printer, PrinterConstants, receiptData, filteredReceiptLines, orderNumber, shopName, template);
+          console.log(`[RECEIPT PRINT] Receipt printed manually as text`);
+        }
+        
+        // Add feed line between copies (except after last copy)
+        if (copy < printCopies) {
+          await printer.addFeedLine(2);
+        }
+      }
+      
+      // Step 7: Add paper cut command (before sending data) - only on last copy
+      step = 'adding paper cut';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
+      try {
+        await printer.addCut();
+        console.log(`[RECEIPT PRINT] Paper cut command added`);
+      } catch (cutError: any) {
+        console.warn(`[RECEIPT PRINT] Paper cut command failed (continuing anyway):`, cutError);
+        // Continue even if cut fails - some printers handle it differently
+      }
+      
+      // Step 8: Send data to printer (includes cut command)
+      step = 'sending data to printer';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
+      await printer.sendData();
+      console.log(`[RECEIPT PRINT] Data sent successfully`);
+      
+      // Step 9: Disconnect
+      step = 'disconnecting from printer';
+      console.log(`[RECEIPT PRINT] Step: ${step}`);
+      await printer.disconnect();
+      console.log(`[RECEIPT PRINT] Disconnected successfully`);
+      
+      // Print successful - no alert needed (silent success)
+      setIsEpsonPrinting(false);
+    } catch (error: any) {
+      console.error(`[RECEIPT PRINT] Error at step: ${step}`);
+      console.error('[RECEIPT PRINT] Error object:', error);
+      console.error('[RECEIPT PRINT] Error type:', typeof error);
+      console.error('[RECEIPT PRINT] Error constructor:', error?.constructor?.name);
+      console.error('[RECEIPT PRINT] Error keys:', Object.keys(error || {}));
+      console.error('[RECEIPT PRINT] Full error details:', {
+        message: error?.message,
+        code: error?.code,
+        name: error?.name,
+        stack: error?.stack,
+        toString: error?.toString?.(),
+        userInfo: error?.userInfo,
+        nativeError: error?.nativeError,
+        target,
+        deviceName,
+        step,
+        printers: printers?.map(p => ({ target: p.target, name: p.name, ipAddress: p.ipAddress, deviceType: p.deviceType })),
+      });
+      
+      // Try to get native error details
+      let nativeErrorDetails = '';
+      try {
+        if (error?.nativeError) {
+          nativeErrorDetails = `\nNative Error: ${JSON.stringify(error.nativeError)}`;
+        }
+        if (error?.userInfo) {
+          nativeErrorDetails += `\nUser Info: ${JSON.stringify(error.userInfo)}`;
+        }
+      } catch (e) {
+        // ignore
+      }
+      
+      setIsEpsonPrinting(false);
+      
+      // Extract error message from various possible formats
+      let errorMessage = 'Unknown error';
+      if (error?.message) {
+        errorMessage = error.message;
+      } else if (error?.code) {
+        errorMessage = `Error code: ${error.code}`;
+      } else if (error?.name) {
+        errorMessage = `Error: ${error.name}`;
+      } else if (error?.toString) {
+        errorMessage = error.toString();
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error) {
+        try {
+          errorMessage = JSON.stringify(error);
+        } catch (e) {
+          errorMessage = String(error);
+        }
+      }
+      
+      const errorTarget = target || 'N/A';
+      const errorDevice = deviceName || 'N/A';
+      const printerInfo = printers?.find(p => p.target === target);
+      const errorIP = printerInfo?.ipAddress || 'N/A';
+      const errorPort = printerInfo?.port || 'N/A';
+      const errorType = printerInfo?.ipAddress ? 'WiFi/LAN' : 'Bluetooth';
+      
+      Alert.alert(
+        'Print Failed', 
+        `Failed at step: ${step}\n\nError: ${errorMessage}${nativeErrorDetails}\n\nDebug Info:\nTarget: ${errorTarget}\nDevice: ${errorDevice}\nIP: ${errorIP}\nPort: ${errorPort}\nType: ${errorType}\n\nPlease check console logs for full error details.\n\nTroubleshooting:\n1. Printer is powered on\n2. Printer is connected (Bluetooth/WiFi)\n3. Printer is in range\n4. For WiFi: printer is on same network\n5. View is rendered (try scrolling or waiting a moment)\n6. Check console logs for more details`
+      );
+    }
+  };
+
+  const handlePrintToAllPrinters = async () => {
+    if (!printers || printers.length === 0) {
+      Alert.alert(
+        'No Printers Found',
+        'No printers were discovered. Make sure:\n\n1. Bluetooth/WiFi is enabled on your device\n2. The printer is powered on\n3. For Bluetooth: printer is in pairing/discovery mode and within range\n4. For WiFi/LAN: printer is on the same network\n\nDiscovery runs automatically in the background.'
+      );
+      return;
+    }
+
+    // Try to load the module
+    let Printer: any = null;
+    try {
+      const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
+      Printer = mod?.Printer;
+    } catch (e) {
+      console.error('Failed to import Epson module:', e);
+    }
+
+    if (!Printer) {
+      Alert.alert(
+        'Printer Module Not Found', 
+        'The Epson printer module is not included in this build. Make sure you:\n\n1. Installed react-native-esc-pos-printer\n2. Rebuilt the app with npx expo run:android\n3. Not using Expo Go (use a development build)'
+      );
+      return;
+    }
+
+    const viewTag = findNodeHandle(printViewRef.current);
+    if (!viewTag) {
+      Alert.alert('Printer', 'Printable view not ready.');
+      return;
+    }
+
+    setIsPrintingToAll(true);
+    const results: Array<{ printer: string; success: boolean; error?: string }> = [];
+
+    // Print to all printers sequentially
+    for (const printerInfo of printers) {
+      try {
+        const deviceName = printerInfo.deviceName || printerInfo.name || 'Printer';
+        const validDeviceName = deviceName && deviceName.trim() !== '' ? deviceName.trim() : 'Printer';
+        const validTarget = printerInfo.target && printerInfo.target.trim() !== '' ? printerInfo.target.trim() : null;
+        
+        if (!validTarget) {
+          throw new Error('Invalid printer target');
+        }
+        
+        console.log(`Printing to printer: ${validDeviceName} (target: ${validTarget})`);
+        
+        // Create printer instance and use addViewShot
+        const printer = new Printer({
+          target: validTarget,
+          deviceName: validDeviceName,
+        });
+        
+        // Connect to printer (timeout is optional)
+        try {
+          await printer.connect(5000); // 5 second timeout
+        } catch (connectError: any) {
+          // If connect with timeout fails, try without timeout
+          if (connectError?.message?.includes('parameter') || connectError?.message?.includes('invalid')) {
+            console.log('Retrying connect without timeout parameter');
+            await printer.connect();
+          } else {
+            throw connectError;
+          }
+        }
+        
+        // Capture view and add to print buffer
+        await Printer.addViewShot(printer, {
+          viewNode: viewTag,
+          width: 80, // 80mm paper width
+        });
+        
+        // Send data to printer
+        await printer.sendData();
+        
+        // Add cut
+        await printer.addCut();
+        
+        // Disconnect
+        await printer.disconnect();
+        
+        results.push({ printer: deviceName, success: true });
+        console.log(`Successfully printed to ${deviceName}`);
+      } catch (error: any) {
+        const deviceName = printerInfo.deviceName || printerInfo.name || printerInfo.target;
+        const errorMessage = error?.message || String(error) || 'Unknown error';
+        console.error(`Failed to print to ${deviceName}:`, error);
+        results.push({ printer: deviceName, success: false, error: errorMessage });
+      }
+    }
+
+    setIsPrintingToAll(false);
+
+    // Show summary
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+    
+    if (successCount === results.length) {
+      Alert.alert('Success', `Receipt printed to all ${successCount} printer(s).`);
+    } else if (successCount > 0) {
+      const failedPrinters = results.filter(r => !r.success).map(r => `• ${r.printer}`).join('\n');
+      Alert.alert(
+        'Partial Success',
+        `Printed to ${successCount} of ${results.length} printer(s).\n\nFailed printers:\n${failedPrinters}`
+      );
+    } else {
+      const failedPrinters = results.map(r => `• ${r.printer}: ${r.error || 'Unknown error'}`).join('\n');
+      Alert.alert(
+        'Print Failed',
+        `Failed to print to all printers:\n\n${failedPrinters}\n\nPlease check:\n\n1. Printers are powered on\n2. Printers are connected (Bluetooth/WiFi)\n3. Printers are in range`
+      );
+    }
+  };
+
+  const handleSimpleTestPrint = async () => {
+    let target: string | null = null;
+    let deviceName: string = 'Printer';
+    
+    // Get saved default printer first, then fall back to discovered printers
+    const savedPrinterMac = await getEpsonPrinterMac();
+    
+    // Prefer saved default printer if available
+    if (savedPrinterMac) {
+      const savedPrinter = printers?.find(p => p.target === savedPrinterMac);
+      if (savedPrinter) {
+        target = savedPrinterMac;
+        deviceName = savedPrinter.deviceName || savedPrinter.name || 'Printer';
+        console.log('Using saved default printer for test:', deviceName);
+      } else {
+        target = savedPrinterMac;
+        deviceName = 'Printer';
+        console.log('Using saved default printer (not in discovery list) for test:', target);
+      }
+    }
+    
+    // Fall back to first discovered printer if no default is set
+    if (!target && printers && printers.length > 0) {
+      target = printers[0]?.target;
+      deviceName = printers[0]?.deviceName || printers[0]?.name || 'Printer';
+      console.log('Using first discovered printer for test:', deviceName);
+    }
+    
+    if (!target) {
+      Alert.alert(
+        'No Printers Found',
+        'No printers were discovered. Make sure:\n\n1. Bluetooth/WiFi is enabled on your device\n2. The printer is powered on\n3. For Bluetooth: printer is in pairing/discovery mode and within range\n4. For WiFi/LAN: printer is on the same network\n\nDiscovery runs automatically in the background.'
+      );
+      return;
+    }
+
+      // Try to load the module
+      let Printer: any = null;
+      let PrinterConstants: any = null;
+      try {
+        const mod: any = await import('react-native-esc-pos-printer').catch(() => null);
+        Printer = mod?.Printer;
+        PrinterConstants = mod?.PrinterConstants;
+      } catch (e) {
+        console.error('Failed to import Epson module:', e);
+      }
+
+      if (!Printer) {
+        Alert.alert(
+          'Printer Module Not Found', 
+          'The Epson printer module is not included in this build. Make sure you:\n\n1. Installed react-native-esc-pos-printer\n2. Rebuilt the app with npx expo run:android\n3. Not using Expo Go (use a development build)'
+        );
         return;
       }
 
-      setIsEpsonPrinting(true);
-      console.log(`Printing to printer: ${printers[0]?.name || target}`);
-      
-      // Based on the library example (PrintFromView)
-      // Try different API methods
-      if (typeof EpsonModule.printFromView === 'function') {
-        await EpsonModule.printFromView(target, viewTag, 80);
-      } else if (EpsonModule.prototype && typeof EpsonModule.prototype.printFromView === 'function') {
-        const printer = new EpsonModule(target, 80);
-        await printer.printFromView(viewTag);
-        await printer.close?.();
-      } else if (typeof EpsonModule === 'function') {
-        // Try constructor approach
-        const printer = new EpsonModule(target, 80);
-        await printer.init?.();
-        await printer.printFromView?.(viewTag);
-        await printer.close?.();
-      } else {
-        Alert.alert('Printer', 'printFromView API not available. Check library version.');
-        setIsEpsonPrinting(false);
+      if (!PrinterConstants) {
+        Alert.alert(
+          'PrinterConstants Not Found', 
+          'PrinterConstants is not available. Make sure you have the latest version of react-native-esc-pos-printer.'
+        );
         return;
       }
+
+      setIsTestPrinting(true);
       
-      Alert.alert('Success', 'Print job sent to printer');
-      setIsEpsonPrinting(false);
+      // Ensure deviceName is a valid non-empty string
+      const validDeviceName = deviceName && deviceName.trim() !== '' ? deviceName.trim() : 'Printer';
+      console.log(`[TEST PRINT] Starting test print to printer: ${validDeviceName} (target: ${target})`);
+      console.log('[TEST PRINT] Full printer info:', JSON.stringify(printers?.find(p => p.target === target), null, 2));
+      
+      // Validate target
+      if (!target || target.trim() === '') {
+        throw new Error('Invalid printer target');
+      }
+      
+      let printer: any = null;
+      let step = 'initialization';
+      
+      try {
+        // Step 1: Create printer instance
+        step = 'creating printer instance';
+        console.log(`[TEST PRINT] Step: ${step}`);
+        printer = new Printer({
+          target: target.trim(),
+          deviceName: validDeviceName,
+        });
+        console.log(`[TEST PRINT] Printer instance created successfully`);
+        
+        // Step 2: Connect to printer
+        step = 'connecting to printer';
+        console.log(`[TEST PRINT] Step: ${step}`);
+        try {
+          await printer.connect(5000); // 5 second timeout
+          console.log(`[TEST PRINT] Connected with timeout parameter`);
+        } catch (connectError: any) {
+          console.log(`[TEST PRINT] Connect with timeout failed:`, connectError);
+          // If connect with timeout fails, try without timeout
+          if (connectError?.message?.includes('parameter') || connectError?.message?.includes('invalid')) {
+            console.log('[TEST PRINT] Retrying connect without timeout parameter');
+            await printer.connect();
+            console.log(`[TEST PRINT] Connected without timeout parameter`);
+          } else {
+            throw new Error(`Connection failed: ${connectError?.message || connectError?.toString() || JSON.stringify(connectError)}`);
+          }
+        }
+        
+        // Step 3: Add text alignment (optional - skip if not supported)
+        step = 'adding text alignment';
+        console.log(`[TEST PRINT] Step: ${step}`);
+        try {
+          if (printer.addTextAlign && typeof printer.addTextAlign === 'function') {
+            await printer.addTextAlign(PrinterConstants.ALIGN_CENTER);
+            console.log(`[TEST PRINT] Text alignment set to center`);
+          } else {
+            console.log(`[TEST PRINT] addTextAlign not available, skipping alignment`);
+          }
+        } catch (alignError: any) {
+          console.warn(`[TEST PRINT] Text alignment failed (continuing anyway):`, alignError);
+          // Continue without alignment
+        }
+      
+      // Step 4: Add header text
+      step = 'adding header text';
+      console.log(`[TEST PRINT] Step: ${step}`);
+      await printer.addText('========================\n');
+      await printer.addText('PRINTER TEST\n');
+      await printer.addText('========================\n');
+      await printer.addFeedLine(1);
+      
+      // Step 5: Add debug info
+      step = 'adding debug info';
+      console.log(`[TEST PRINT] Step: ${step}`);
+      try {
+        if (printer.addTextAlign && typeof printer.addTextAlign === 'function') {
+          await printer.addTextAlign(PrinterConstants.ALIGN_LEFT);
+          console.log(`[TEST PRINT] Text alignment set to left`);
+        }
+      } catch (alignError: any) {
+        console.warn(`[TEST PRINT] Text alignment failed (continuing anyway):`, alignError);
+        // Continue without alignment
+      }
+      await printer.addText(`Device: ${validDeviceName}\n`);
+      await printer.addText(`Target: ${target}\n`);
+      const printerInfo = printers?.find(p => p.target === target);
+      if (printerInfo) {
+        if (printerInfo.ipAddress) {
+          await printer.addText(`IP: ${printerInfo.ipAddress}\n`);
+        }
+        if (printerInfo.port) {
+          await printer.addText(`Port: ${printerInfo.port}\n`);
+        }
+        await printer.addText(`Type: ${printerInfo.ipAddress ? 'WiFi/LAN' : 'Bluetooth'}\n`);
+      }
+      const currentDate = new Date();
+      await printer.addText(`Date: ${currentDate.toLocaleString()}\n`);
+      await printer.addFeedLine(1);
+      await printer.addText('This is a test print.\n');
+      await printer.addText('If you see this, the printer is working!\n');
+      await printer.addFeedLine(1);
+      try {
+        if (printer.addTextAlign && typeof printer.addTextAlign === 'function') {
+          await printer.addTextAlign(PrinterConstants.ALIGN_CENTER);
+          console.log(`[TEST PRINT] Text alignment set to center`);
+        }
+      } catch (alignError: any) {
+        console.warn(`[TEST PRINT] Text alignment failed (continuing anyway):`, alignError);
+        // Continue without alignment
+      }
+      await printer.addText('========================\n');
+      
+      // Add bottom margin with multiple feed lines before cutting
+      await printer.addFeedLine(3);
+      
+      // Step 6: Add paper cut command (before sending data)
+      step = 'adding paper cut';
+      console.log(`[TEST PRINT] Step: ${step}`);
+      try {
+        await printer.addCut();
+        console.log(`[TEST PRINT] Paper cut command added`);
+      } catch (cutError: any) {
+        console.warn(`[TEST PRINT] Paper cut command failed (continuing anyway):`, cutError);
+        // Continue even if cut fails - some printers handle it differently
+      }
+      
+      // Step 7: Send data to printer (includes cut command)
+      step = 'sending data to printer';
+      console.log(`[TEST PRINT] Step: ${step}`);
+      await printer.sendData();
+      console.log(`[TEST PRINT] Data sent successfully`);
+      
+      // Step 8: Disconnect
+      step = 'disconnecting from printer';
+      console.log(`[TEST PRINT] Step: ${step}`);
+      await printer.disconnect();
+      console.log(`[TEST PRINT] Disconnected successfully`);
+      
+      Alert.alert('Success', 'Test print sent to printer successfully!');
+      setIsTestPrinting(false);
     } catch (error: any) {
-      console.error('Epson print error:', error);
-      setIsEpsonPrinting(false);
-      Alert.alert('Printer Error', `Failed to print: ${error?.message || 'Unknown error'}`);
+      console.error(`[TEST PRINT] Error at step: ${step}`);
+      console.error('[TEST PRINT] Error object:', error);
+      console.error('[TEST PRINT] Error type:', typeof error);
+      console.error('[TEST PRINT] Error constructor:', error?.constructor?.name);
+      console.error('[TEST PRINT] Error keys:', Object.keys(error || {}));
+      console.error('[TEST PRINT] Full error details:', {
+        message: error?.message,
+        code: error?.code,
+        name: error?.name,
+        stack: error?.stack,
+        toString: error?.toString?.(),
+        userInfo: error?.userInfo,
+        nativeError: error?.nativeError,
+        target,
+        deviceName,
+        step,
+        printers: printers?.map(p => ({ target: p.target, name: p.name, ipAddress: p.ipAddress, deviceType: p.deviceType })),
+      });
+      
+      // Try to get native error details
+      let nativeErrorDetails = '';
+      try {
+        if (error?.nativeError) {
+          nativeErrorDetails = `\nNative Error: ${JSON.stringify(error.nativeError)}`;
+        }
+        if (error?.userInfo) {
+          nativeErrorDetails += `\nUser Info: ${JSON.stringify(error.userInfo)}`;
+        }
+      } catch (e) {
+        // ignore
+      }
+      
+      setIsTestPrinting(false);
+      
+      // Extract error message from various possible formats
+      let errorMessage = 'Unknown error';
+      if (error?.message) {
+        errorMessage = error.message;
+      } else if (error?.code) {
+        errorMessage = `Error code: ${error.code}`;
+      } else if (error?.name) {
+        errorMessage = `Error: ${error.name}`;
+      } else if (error?.toString) {
+        errorMessage = error.toString();
+      } else if (typeof error === 'string') {
+        errorMessage = error;
+      } else if (error) {
+        try {
+          errorMessage = JSON.stringify(error);
+        } catch (e) {
+          errorMessage = String(error);
+        }
+      }
+      
+      const errorTarget = target || 'N/A';
+      const errorDevice = deviceName || 'N/A';
+      const printerInfo = printers?.find(p => p.target === target);
+      const errorIP = printerInfo?.ipAddress || 'N/A';
+      const errorPort = printerInfo?.port || 'N/A';
+      const errorType = printerInfo?.ipAddress ? 'WiFi/LAN' : 'Bluetooth';
+      
+      Alert.alert(
+        'Test Print Failed', 
+        `Failed at step: ${step}\n\nError: ${errorMessage}${nativeErrorDetails}\n\nDebug Info:\nTarget: ${errorTarget}\nDevice: ${errorDevice}\nIP: ${errorIP}\nPort: ${errorPort}\nType: ${errorType}\n\nPlease check console logs for full error details.\n\nTroubleshooting:\n1. Printer is powered on\n2. Printer is connected (Bluetooth/WiFi)\n3. Printer is in range\n4. For WiFi: printer is on same network\n5. Check console logs for more details`
+      );
     }
   };
 
@@ -203,17 +786,6 @@ export default function ReceiptScreen() {
   };
 
   const { receiptData, isJson } = parseReceiptData();
-
-  // Calculate subtotal and GST from total (GST is 10% inclusive)
-  const calculateTotals = (total: number) => {
-    const subtotal = total * (100 / 110);
-    const gst = total * (10 / 110);
-    return {
-      subtotal: Math.round(subtotal * 100) / 100,
-      gst: Math.round(gst * 100) / 100,
-      total: total,
-    };
-  };
 
   const formatReceiptText = (text: string) => {
     // Split text into lines and format as receipt
@@ -366,6 +938,44 @@ export default function ReceiptScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [receiptData, filteredReceiptLines, isSaved, isSaving, isExistingReceipt]);
 
+  // Auto-print if enabled (after receipt is processed and saved)
+  useEffect(() => {
+    if (isExistingReceipt) {
+      // Skip auto-print for existing receipts
+      autoPrintAttemptedRef.current = true;
+      return;
+    }
+    const autoPrintIfEnabled = async () => {
+      // Prevent multiple auto-print attempts
+      if (autoPrintAttemptedRef.current) {
+        return;
+      }
+      try {
+        const autoPrint = await getAutoPrinter();
+        // Wait for receipt data to be processed and saved before auto-printing
+        if (autoPrint && isSaved && !isEpsonPrinting && (receiptData || (filteredReceiptLines && filteredReceiptLines.length > 0))) {
+          autoPrintAttemptedRef.current = true;
+          // Small delay to ensure view is rendered
+          setTimeout(async () => {
+            try {
+              await handleEpsonPrint();
+            } catch (e) {
+              console.error('Auto-print error:', e);
+              // Error message is already shown in handleEpsonPrint
+            }
+          }, 500);
+        }
+      } catch (e) {
+        console.error('Auto-print check error:', e);
+      }
+    };
+    // Only auto-print after receipt is saved and data is ready
+    if (isSaved && (receiptData || (filteredReceiptLines && filteredReceiptLines.length > 0))) {
+      autoPrintIfEnabled();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSaved, isExistingReceipt, isEpsonPrinting, receiptData, filteredReceiptLines]);
+
   const handlePrint = async () => {
     try {
       setIsPrinting(true);
@@ -420,18 +1030,7 @@ export default function ReceiptScreen() {
   };
 
   const generateReceiptHTMLFromJSON = (receiptData: ReceiptData, orderNum: string | null): string => {
-    const currentDate = new Date();
-    const weekday = currentDate.toLocaleDateString('en-US', { weekday: 'short' });
-    const day = currentDate.getDate().toString().padStart(2, '0');
-    const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
-    const year = currentDate.getFullYear();
-    const timeStr = currentDate.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: true
-    });
-    const dateTimeStr = `${weekday}, ${day}/${month}/${year} - ${timeStr}`;
-
+    const dateTimeStr = formatDateTime();
     const totals = calculateTotals(receiptData.total);
 
     let productsHTML = '';
@@ -573,18 +1172,7 @@ export default function ReceiptScreen() {
     hasPrice: boolean;
     key: string;
   }>, orderNum: string | null): string => {
-    const currentDate = new Date();
-    // Format: "Wed, 25/11/2025 - 11:50 AM"
-    const weekday = currentDate.toLocaleDateString('en-US', { weekday: 'short' });
-    const day = currentDate.getDate().toString().padStart(2, '0');
-    const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
-    const year = currentDate.getFullYear();
-    const timeStr = currentDate.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: true
-    });
-    const dateTimeStr = `${weekday}, ${day}/${month}/${year} - ${timeStr}`;
+    const dateTimeStr = formatDateTime();
 
     const productLines = lines.filter(line => !line.isTotalLine);
     const totalLines = lines.filter(line => line.isTotalLine);
@@ -791,7 +1379,7 @@ export default function ReceiptScreen() {
             <IconSymbol 
               name="antenna.radiowaves.left.and.right" 
               size={24} 
-              color={isEpsonPrinting ? secondaryText : tintColor} 
+              color={isEpsonPrinting ? tintColor + '80' : tintColor} 
             />
           </TouchableOpacity>
         </View>
@@ -844,7 +1432,7 @@ export default function ReceiptScreen() {
                   minute: '2-digit',
                   hour12: true
                 });
-                return `${weekday}, ${day}/${month}/${year} - ${timeStr}`;
+                return `${weekday}, ${day}/${month}/${year} ${timeStr}`;
               })()}
             </ThemedText>
             <View style={[styles.divider, { backgroundColor: borderColor }]} />
@@ -1003,6 +1591,107 @@ export default function ReceiptScreen() {
             <ThemedText style={[styles.footerText, { color: secondaryText }]}>Thank you for your purchase!</ThemedText>
           </View>
         </View>
+
+        {/* Debug Info Section - Collapsible, hidden by default */}
+        {printers && printers.length > 0 && (
+          <View style={[styles.debugSection, { marginTop: 16, backgroundColor: tintColor + '10', borderRadius: 8, borderWidth: 1, borderColor: tintColor + '20', overflow: 'hidden' }]}>
+            <TouchableOpacity 
+              onPress={() => setShowDebugInfo(!showDebugInfo)}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12 }}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <IconSymbol 
+                  name={showDebugInfo ? "chevron.down" : "chevron.right"} 
+                  size={16} 
+                  color={tintColor} 
+                />
+                <ThemedText style={[styles.debugTitle, { color: tintColor }]}>
+                  Printer Debug Info
+                </ThemedText>
+              </View>
+              <ThemedText style={[styles.debugText, { fontSize: 11, color: secondaryText, marginLeft: 8 }]}>
+                {printers.length} printer{printers.length > 1 ? 's' : ''}
+              </ThemedText>
+            </TouchableOpacity>
+            {showDebugInfo && printers[0] && (
+              <View style={{ padding: 12, paddingTop: 0, gap: 4 }}>
+                {(() => {
+                  const p = printers[0];
+                  const isWiFi = p.ipAddress && p.ipAddress.trim() !== '';
+                  return (
+                    <>
+                      <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                        Device Name: {p.deviceName || 'N/A'}
+                      </ThemedText>
+                      <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                        Name: {p.name || 'N/A'}
+                      </ThemedText>
+                      <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                        Target: {p.target || 'N/A'}
+                      </ThemedText>
+                      {isWiFi && (
+                        <>
+                          <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                            IP Address: {p.ipAddress || 'N/A'}
+                          </ThemedText>
+                          <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                            Port: {p.port || 'N/A (default: 9100)'}
+                          </ThemedText>
+                        </>
+                      )}
+                      <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                        Type: {isWiFi ? 'WiFi/LAN' : 'Bluetooth'}
+                      </ThemedText>
+                      <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                        Device Type: {p.deviceType || 'N/A'}
+                      </ThemedText>
+                      <ThemedText style={[styles.debugText, { fontSize: 11, fontFamily: 'monospace' }]}>
+                        Total Printers: {printers.length}
+                      </ThemedText>
+                    </>
+                  );
+                })()}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Simple Test Print Button */}
+        {printers && printers.length > 0 && (
+          <TouchableOpacity 
+            onPress={handleSimpleTestPrint} 
+            style={[styles.printToAllButton, { backgroundColor: tintColor, borderColor: tintColor, marginTop: 12 }]}
+            disabled={isTestPrinting}
+          >
+            <IconSymbol 
+              name="checkmark.circle.fill" 
+              size={20} 
+              color="#fff" 
+            />
+            <ThemedText style={styles.printToAllButtonText}>
+              {isTestPrinting ? 'Printing Test...' : 'Simple Test Print (Text Only)'}
+            </ThemedText>
+          </TouchableOpacity>
+        )}
+
+        {/* Print to All Printers Button - Show when multiple printers are found */}
+        {printers && printers.length > 1 && (
+          <TouchableOpacity
+            onPress={handlePrintToAllPrinters}
+            style={[styles.printToAllButton, { backgroundColor: tintColor, borderColor: tintColor }]}
+            disabled={isPrintingToAll}
+          >
+            <IconSymbol 
+              name="antenna.radiowaves.left.and.right" 
+              size={20} 
+              color="#fff" 
+            />
+            <ThemedText style={styles.printToAllButtonText}>
+              {isPrintingToAll ? `Printing to ${printers.length} printers...` : `Print to All Printers (${printers.length})`}
+            </ThemedText>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </ThemedView>
   );
@@ -1214,6 +1903,37 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     fontStyle: 'italic',
+  },
+  printToAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  printToAllButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  debugSection: {
+    borderWidth: 1,
+    borderColor: 'rgba(10, 126, 164, 0.2)',
+  },
+  debugTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  debugText: {
+    fontSize: 11,
+    fontFamily: 'monospace',
+    opacity: 0.8,
   },
 });
 

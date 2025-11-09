@@ -3,13 +3,21 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { extractTextFromImageWithMode } from '@/utils/ocr';
 import { getCurrentOrderNumber, getNextOrderNumber } from '@/utils/orderNumber';
-import { getOCRMode } from '@/utils/settings';
+import { getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode } from '@/utils/settings';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, StyleSheet, TouchableOpacity, View } from 'react-native';
+// Lazy load ImageManipulator - it's a native module that requires a development build
+let ImageManipulator: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  ImageManipulator = require('expo-image-manipulator');
+} catch (e) {
+  console.warn('expo-image-manipulator not available - will use quality reduction only');
+}
 
 const { width, height } = Dimensions.get('window');
 
@@ -65,15 +73,40 @@ export default function CaptureScreen() {
   const takePicture = async () => {
     if (cameraRef.current) {
       try {
+        // Check if image optimization is enabled and get settings
+        const optimizeImage = await getImageOptimization();
+        const quality = optimizeImage ? (await getImageOptimizationQuality()) / 100 : 0.9;
+        const resizeWidth = optimizeImage ? await getImageOptimizationResizeWidth() : 1024;
+        
         // Request base64 directly from camera to avoid file reading issues
         const photo = await cameraRef.current.takePictureAsync({
           base64: true,
-          quality: 0.9,
+          quality: quality, // Use configured quality if optimization is enabled
         });
         if (photo) {
-          // If we have base64, use it directly; otherwise use URI
+          // If optimization is enabled, try to resize the image (requires native module)
+          if (optimizeImage && photo.uri && ImageManipulator) {
+            try {
+              // Resize image to configured width while maintaining aspect ratio
+              const manipulatedImage = await ImageManipulator.manipulateAsync(
+                photo.uri,
+                [{ resize: { width: resizeWidth } }],
+                { compress: quality, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+              );
+              
+              if (manipulatedImage.base64) {
+                processImageWithBase64(manipulatedImage.base64, manipulatedImage.uri);
+                return;
+              }
+            } catch (manipulateError) {
+              console.warn('Image manipulation not available or failed, using quality reduction only:', manipulateError);
+              // Fall through to use quality-reduced image
+            }
+          }
+          
+          // Use quality-reduced image (works even without native module)
           if (photo.base64) {
-            processImageWithBase64(photo.base64);
+            processImageWithBase64(photo.base64, photo.uri);
           } else {
             processImage(photo.uri);
           }
@@ -92,17 +125,43 @@ export default function CaptureScreen() {
       return;
     }
 
+    // Check if image optimization is enabled and get settings
+    const optimizeImage = await getImageOptimization();
+    const quality = optimizeImage ? (await getImageOptimizationQuality()) / 100 : 1;
+    const resizeWidth = optimizeImage ? await getImageOptimizationResizeWidth() : 1024;
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [3, 4], // Portrait aspect ratio suitable for receipts (width:height)
-      quality: 1,
+      quality: quality, // Use configured quality if optimization is enabled
       base64: true, // Request base64 directly to avoid file reading issues
     });
 
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
-      // If we have base64, use it directly; otherwise use URI
+      
+      // If optimization is enabled, try to resize the image (requires native module)
+      if (optimizeImage && asset.uri && ImageManipulator) {
+        try {
+          // Resize image to configured width while maintaining aspect ratio
+          const manipulatedImage = await ImageManipulator.manipulateAsync(
+            asset.uri,
+            [{ resize: { width: resizeWidth } }],
+            { compress: quality, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+          );
+          
+          if (manipulatedImage.base64) {
+            processImageWithBase64(manipulatedImage.base64, manipulatedImage.uri);
+            return;
+          }
+        } catch (manipulateError) {
+          console.warn('Image manipulation not available or failed, using quality reduction only:', manipulateError);
+          // Fall through to use quality-reduced image
+        }
+      }
+      
+      // Use quality-reduced image (works even without native module)
       if (asset.base64) {
         processImageWithBase64(asset.base64, asset.uri);
       } else {
