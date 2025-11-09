@@ -14,6 +14,8 @@
  *    Note: Generative AI can now receive images directly - no Vision API needed!
  */
 
+import { extractTokenUsage, recordAPIUsage } from './aiCostTracker';
+
 const GOOGLE_VISION_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_VISION_API_KEY || '';
 const GOOGLE_AI_KEY = process.env.EXPO_PUBLIC_GOOGLE_AI_KEY || '';
 const MODEL_ID = process.env.EXPO_PUBLIC_MODEL_ID || 'gemini-pro';
@@ -77,11 +79,15 @@ export interface ReceiptData {
 }
 
 /**
- * Extract and format receipt directly from image using Google Generative AI
- * Sends image directly to Gemini (no Vision API needed)
+ * Extract and format receipt directly from image(s) using Google Generative AI
+ * Sends image(s) directly to Gemini (no Vision API needed)
  * This is more efficient than the two-step process
+ * Supports single image or multiple images for multi-page receipts
  */
-export async function extractReceiptFromImageWithGenerativeAI(base64Image: string): Promise<ReceiptData> {
+export async function extractReceiptFromImageWithGenerativeAI(
+  base64Image: string | string[],
+  isMultiPage: boolean = false
+): Promise<ReceiptData> {
   if (!GOOGLE_AI_KEY || GOOGLE_AI_KEY === '') {
     throw new Error('Google AI key not configured. Please set EXPO_PUBLIC_GOOGLE_AI_KEY');
   }
@@ -187,17 +193,32 @@ KEY POINTS:
 
 JSON response:`;
 
-    // Determine mime type from base64 string (assuming it might have data URL prefix)
-    let imageData = base64Image;
-    let mimeType = 'image/jpeg'; // default
+    // Handle single or multiple images
+    const images = Array.isArray(base64Image) ? base64Image : [base64Image];
     
-    // Check if base64Image is a data URL
-    if (base64Image.startsWith('data:')) {
-      const mimeMatch = base64Image.match(/data:([^;]+);base64,/);
-      if (mimeMatch) {
-        mimeType = mimeMatch[1];
-        imageData = base64Image.split(',')[1];
+    // Build parts array with prompt and all images
+    const parts: any[] = [{ text: prompt }];
+    
+    // Add all images to the parts array
+    for (const img of images) {
+      let imageData = img;
+      let mimeType = 'image/jpeg'; // default
+      
+      // Check if image is a data URL
+      if (img.startsWith('data:')) {
+        const mimeMatch = img.match(/data:([^;]+);base64,/);
+        if (mimeMatch) {
+          mimeType = mimeMatch[1];
+          imageData = img.split(',')[1];
+        }
       }
+      
+      parts.push({
+        inline_data: {
+          mime_type: mimeType,
+          data: imageData
+        }
+      });
     }
 
     const response = await fetch(
@@ -207,17 +228,7 @@ JSON response:`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{
-            parts: [
-              {
-                text: prompt
-              },
-              {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: imageData
-                }
-              }
-            ]
+            parts: parts
           }]
         })
       }
@@ -259,6 +270,46 @@ JSON response:`;
     // Check for errors in response
     if (data.error) {
       throw new Error(`Google AI API error: ${JSON.stringify(data.error)}`);
+    }
+
+    // Extract token usage from API response
+    const tokenUsage = extractTokenUsage(data);
+    if (tokenUsage) {
+      console.log('AI API Token Usage:', {
+        promptTokens: tokenUsage.promptTokens,
+        candidatesTokens: tokenUsage.candidatesTokens,
+        totalTokens: tokenUsage.totalTokens,
+      });
+    }
+
+    // Record API usage and cost
+    try {
+      const requestSize = JSON.stringify({
+        contents: [{
+          parts: parts.map((p, i) => 
+            i === 0 ? p : { inline_data: { mime_type: 'image/jpeg', data: '...' } }
+          )
+        }]
+      }).length;
+      const responseSize = responseText.length;
+      
+      const usage = await recordAPIUsage(
+        MODEL_ID,
+        tokenUsage,
+        requestSize,
+        responseSize
+      );
+      
+      console.log('AI API Cost:', {
+        model: usage.model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.totalTokens,
+        estimatedCost: `$${usage.estimatedCost.toFixed(6)}`,
+      });
+    } catch (costError) {
+      console.warn('Failed to record API usage:', costError);
+      // Don't fail the request if cost tracking fails
     }
 
     const aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -324,10 +375,14 @@ JSON response:`;
 
 /**
  * Extract and format receipt using Google Generative AI
- * Sends image directly to Generative AI (no Vision API needed)
+ * Sends image(s) directly to Generative AI (no Vision API needed)
+ * Supports single or multiple images for multi-page receipts
  */
-export async function extractAndFormatWithGenerativeAI(base64Image: string): Promise<ReceiptData> {
-  return await extractReceiptFromImageWithGenerativeAI(base64Image);
+export async function extractAndFormatWithGenerativeAI(
+  base64Image: string | string[],
+  isMultiPage: boolean = false
+): Promise<ReceiptData> {
+  return await extractReceiptFromImageWithGenerativeAI(base64Image, isMultiPage);
 }
 
 /**
@@ -353,15 +408,19 @@ export async function extractTextFromImage(base64Image: string): Promise<string>
 /**
  * Extract text with mode selection
  * Returns ReceiptData for 'generative' mode, or raw text string for 'vision' mode
+ * Supports single or multiple images for multi-page receipts
  */
 export async function extractTextFromImageWithMode(
-  base64Image: string, 
-  mode: 'vision' | 'generative'
+  base64Image: string | string[], 
+  mode: 'vision' | 'generative',
+  isMultiPage: boolean = false
 ): Promise<string | ReceiptData> {
   if (mode === 'generative') {
-    return await extractAndFormatWithGenerativeAI(base64Image);
+    return await extractAndFormatWithGenerativeAI(base64Image, isMultiPage);
   } else {
-    return await extractTextFromImage(base64Image);
+    // Vision mode only supports single image
+    const singleImage = Array.isArray(base64Image) ? base64Image[0] : base64Image;
+    return await extractTextFromImage(singleImage);
   }
 }
 

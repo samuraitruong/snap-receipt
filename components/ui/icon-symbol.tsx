@@ -40,6 +40,9 @@ const MAPPING = {
   'plus': 'add',
   'minus': 'remove',
   'chevron.up': 'keyboard-arrow-up',
+  'trash.fill': 'delete',
+  'doc.on.doc': 'description',
+  'doc.on.doc.fill': 'description',
 } as IconMapping;
 
 /**

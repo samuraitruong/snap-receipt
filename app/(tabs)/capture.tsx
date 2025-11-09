@@ -3,7 +3,7 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { extractTextFromImageWithMode } from '@/utils/ocr';
 import { getCurrentOrderNumber, getNextOrderNumber } from '@/utils/orderNumber';
-import { getCameraZoom, getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode, setCameraZoom } from '@/utils/settings';
+import { getCameraZoom, getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getMultiPageCapture, getOCRMode, setCameraZoom, setMultiPageCapture } from '@/utils/settings';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
@@ -28,18 +28,22 @@ export default function CaptureScreen() {
   const [processing, setProcessing] = useState(false);
   const [currentOrderNumber, setCurrentOrderNumber] = useState<number | null>(null);
   const [zoom, setZoom] = useState(0.75); // Default to 0.75 (normalized 0-1 value)
+  const [multiPageMode, setMultiPageMode] = useState(false);
+  const [capturedImages, setCapturedImages] = useState<Array<{ base64: string; uri?: string }>>([]);
   const cameraRef = useRef<CameraView>(null);
 
-  // Load current order number and camera zoom on mount
+  // Load current order number, camera zoom, and multi-page mode on mount
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const [orderNum, savedZoom] = await Promise.all([
+        const [orderNum, savedZoom, multiPage] = await Promise.all([
           getCurrentOrderNumber(),
           getCameraZoom(),
+          getMultiPageCapture(),
         ]);
         setCurrentOrderNumber(orderNum);
         setZoom(savedZoom);
+        setMultiPageMode(multiPage);
       } catch (error) {
         console.error('Error loading settings:', error);
       }
@@ -202,40 +206,75 @@ export default function CaptureScreen() {
 
 
   const processImageWithBase64 = async (base64Image: string, imageUri?: string) => {
+    // If multi-page mode is enabled, add to captured images and ask if they want to add more
+    if (multiPageMode) {
+      const newImages = [...capturedImages, { base64: base64Image, uri: imageUri }];
+      setCapturedImages(newImages);
+      setImage(imageUri || null);
+      
+      // Ask if user wants to add more images
+      Alert.alert(
+        'Image Captured',
+        `Captured ${newImages.length} image(s). Do you want to add more images to this order?`,
+        [
+          {
+            text: 'Done',
+            onPress: async () => {
+              // Process all captured images
+              await processAllImages(newImages);
+            },
+          },
+          {
+            text: 'Add More',
+            onPress: () => {
+              // Continue capturing - clear preview but keep images in state
+              setImage(null);
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    // Single image mode - process immediately
+    await processSingleImage(base64Image, imageUri);
+  };
+
+  const processSingleImage = async (base64Image: string, imageUri?: string) => {
     setProcessing(true);
     setImage(imageUri || null);
 
     try {
-      console.log('Processing image with base64, length:', base64Image.length);
+      console.log('Processing single image with base64, length:', base64Image.length);
 
       // Get the current OCR mode preference
       const ocrMode = await getOCRMode();
       console.log('Using OCR mode:', ocrMode);
 
       // Extract text using the selected OCR mode
-      const extractedData = await extractTextFromImageWithMode(base64Image, ocrMode);
+      const extractedData = await extractTextFromImageWithMode(base64Image, ocrMode, false);
 
-          // Get the next order number for this receipt
-          const orderNumber = await getNextOrderNumber();
-          
-          // Update the current order number display
-          setCurrentOrderNumber(orderNumber);
+      // Get the next order number for this receipt
+      const orderNumber = await getNextOrderNumber();
+      
+      // Update the current order number display
+      setCurrentOrderNumber(orderNumber);
 
-          // Navigate to receipt view with extracted data
-          // For generative mode, pass JSON string; for vision mode, pass text string
-          const extractedDataString = typeof extractedData === 'string' 
-            ? extractedData 
-            : JSON.stringify(extractedData);
-          
-          router.push({
-            pathname: '/receipt',
-            params: {
-              imageUri: imageUri ? encodeURIComponent(imageUri) : '',
-              extractedText: encodeURIComponent(extractedDataString || 'No text extracted'),
-              extractedDataType: ocrMode === 'generative' ? 'json' : 'text',
-              orderNumber: orderNumber.toString(),
-            },
-          });
+      // Navigate to receipt view with extracted data
+      // For generative mode, pass JSON string; for vision mode, pass text string
+      const extractedDataString = typeof extractedData === 'string' 
+        ? extractedData 
+        : JSON.stringify(extractedData);
+      
+      router.push({
+        pathname: '/receipt',
+        params: {
+          imageUri: imageUri ? encodeURIComponent(imageUri) : '',
+          extractedText: encodeURIComponent(extractedDataString || 'No text extracted'),
+          extractedDataType: ocrMode === 'generative' ? 'json' : 'text',
+          orderNumber: orderNumber.toString(),
+        },
+      });
     } catch (error: any) {
       console.error('OCR Error:', error);
       const errorMessage = error?.message || 'Failed to process image';
@@ -258,6 +297,75 @@ export default function CaptureScreen() {
       });
     } finally {
       setProcessing(false);
+      setCapturedImages([]); // Reset captured images
+    }
+  };
+
+  const processAllImages = async (images: Array<{ base64: string; uri?: string }>) => {
+    setProcessing(true);
+    setImage(images[images.length - 1]?.uri || null);
+
+    try {
+      console.log('Processing multiple images, count:', images.length);
+
+      // Get the current OCR mode preference
+      const ocrMode = await getOCRMode();
+      console.log('Using OCR mode:', ocrMode);
+
+      // Extract base64 strings from images
+      const base64Images = images.map(img => img.base64);
+      
+      // Extract text using the selected OCR mode with multiple images
+      const extractedData = await extractTextFromImageWithMode(base64Images, ocrMode, true);
+
+      // Get the next order number for this receipt
+      const orderNumber = await getNextOrderNumber();
+      
+      // Update the current order number display
+      setCurrentOrderNumber(orderNumber);
+
+      // Navigate to receipt view with extracted data
+      // For generative mode, pass JSON string; for vision mode, pass text string
+      const extractedDataString = typeof extractedData === 'string' 
+        ? extractedData 
+        : JSON.stringify(extractedData);
+      
+      // Use the first image URI for display
+      const firstImageUri = images[0]?.uri || '';
+      
+      router.push({
+        pathname: '/receipt',
+        params: {
+          imageUri: firstImageUri ? encodeURIComponent(firstImageUri) : '',
+          extractedText: encodeURIComponent(extractedDataString || 'No text extracted'),
+          extractedDataType: ocrMode === 'generative' ? 'json' : 'text',
+          orderNumber: orderNumber.toString(),
+        },
+      });
+    } catch (error: any) {
+      console.error('OCR Error:', error);
+      const errorMessage = error?.message || 'Failed to process images';
+      Alert.alert('Error', errorMessage);
+      
+      // Get order number even if OCR fails
+      const orderNumber = await getNextOrderNumber();
+      
+      // Update the current order number display
+      setCurrentOrderNumber(orderNumber);
+      
+      // Still navigate to receipt view even if OCR fails
+      const firstImageUri = images[0]?.uri || '';
+      router.push({
+        pathname: '/receipt',
+        params: { 
+          imageUri: firstImageUri ? encodeURIComponent(firstImageUri) : '',
+          extractedText: encodeURIComponent('Failed to extract text: ' + errorMessage),
+          orderNumber: orderNumber.toString(),
+        },
+      });
+    } finally {
+      setProcessing(false);
+      setCapturedImages([]); // Reset captured images
     }
   };
 
@@ -348,6 +456,15 @@ export default function CaptureScreen() {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
   };
 
+  const handleToggleMultiPage = async (value: boolean) => {
+    setMultiPageMode(value);
+    await setMultiPageCapture(value);
+    // Reset captured images when toggling off
+    if (!value) {
+      setCapturedImages([]);
+    }
+  };
+
   return (
     <ThemedView style={styles.container}>
       <CameraView
@@ -405,15 +522,31 @@ export default function CaptureScreen() {
                 )}
               </View>
 
-              {/* Flip Button - Smaller */}
+              {/* Multi-Page Toggle Button - Replaces Flip Button */}
               <View style={styles.rightButtons}>
                 <TouchableOpacity 
-                  style={[styles.actionButton, styles.flipButton, styles.smallButton]} 
-                  onPress={toggleCameraFacing}
+                  style={[
+                    styles.actionButton, 
+                    styles.multiPageButton, 
+                    styles.smallButton,
+                    multiPageMode && styles.multiPageButtonActive
+                  ]} 
+                  onPress={() => handleToggleMultiPage(!multiPageMode)}
                   activeOpacity={0.8}
                 >
-                  <IconSymbol name="arrow.triangle.2.circlepath.camera.fill" size={20} color="#fff" />
+                  <IconSymbol 
+                    name={multiPageMode ? "doc.on.doc.fill" : "doc.on.doc"} 
+                    size={20} 
+                    color={multiPageMode ? "#0a7ea4" : "#fff"} 
+                  />
                 </TouchableOpacity>
+                {multiPageMode && capturedImages.length > 0 && (
+                  <View style={styles.imageCountBadge}>
+                    <ThemedText style={styles.imageCountText}>
+                      {capturedImages.length}
+                    </ThemedText>
+                  </View>
+                )}
               </View>
             </View>
           </View>
@@ -451,6 +584,34 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'transparent',
+  },
+  multiPageButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  multiPageButtonActive: {
+    backgroundColor: 'rgba(10, 126, 164, 0.3)',
+    borderColor: '#0a7ea4',
+  },
+  imageCountBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#0a7ea4',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  imageCountText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
   permissionContainer: {
     flex: 1,

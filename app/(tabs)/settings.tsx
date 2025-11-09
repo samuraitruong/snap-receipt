@@ -5,6 +5,7 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { formatDateTime } from '@/utils/printer';
 import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode, getPrintCopies, getPrinterType, getPrintMargin, getPrintTemplate, getShopName, OCRMode, PrinterType, setAutoPrinter, setAutoSave, setEpsonPrinterMac, setImageOptimization, setImageOptimizationQuality, setImageOptimizationResizeWidth, setOCRMode, setPrintCopies, setPrinterType, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
+import { getTodayCostSummary, getTotalUsage, clearUsageData } from '@/utils/aiCostTracker';
 import * as Print from 'expo-print';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, findNodeHandle, Platform, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
@@ -45,6 +46,8 @@ export default function SettingsScreen() {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isEpsonPrinting, setIsEpsonPrinting] = useState(false);
   const [isTestPrinting, setIsTestPrinting] = useState(false);
+  const [todayCost, setTodayCost] = useState({ requests: 0, tokens: 0, cost: 0 });
+  const [totalUsage, setTotalUsage] = useState({ totalRequests: 0, totalTokens: 0, totalCost: 0, byModel: {} });
   const previewViewRef = useRef<View>(null);
   
   // Use the library's discovery hook - it handles everything automatically
@@ -133,12 +136,66 @@ export default function SettingsScreen() {
         setOcrModeState(mode);
         setTemplateState(tpl);
         setEpsonMac(savedMac);
+        
+        // Load cost tracking data
+        const [todaySummary, totalStats] = await Promise.all([
+          getTodayCostSummary(),
+          getTotalUsage(),
+        ]);
+        setTodayCost(todaySummary);
+        setTotalUsage(totalStats);
       } finally {
         setLoading(false);
       }
     };
     load();
   }, []);
+  
+  // Refresh cost data when screen is focused
+  useEffect(() => {
+    const refreshCosts = async () => {
+      try {
+        const [todaySummary, totalStats] = await Promise.all([
+          getTodayCostSummary(),
+          getTotalUsage(),
+        ]);
+        setTodayCost(todaySummary);
+        setTotalUsage(totalStats);
+      } catch (error) {
+        console.error('Error refreshing cost data:', error);
+      }
+    };
+    
+    // Refresh on mount and set up interval to refresh every 30 seconds
+    refreshCosts();
+    const interval = setInterval(refreshCosts, 30000);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  const handleClearUsageData = async () => {
+    Alert.alert(
+      'Clear Usage Data',
+      'Are you sure you want to clear all AI usage and cost tracking data? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await clearUsageData();
+            const [todaySummary, totalStats] = await Promise.all([
+              getTodayCostSummary(),
+              getTotalUsage(),
+            ]);
+            setTodayCost(todaySummary);
+            setTotalUsage(totalStats);
+            Alert.alert('Success', 'Usage data cleared');
+          },
+        },
+      ]
+    );
+  };
 
   // Auto-start discovery when hook is available - search for both Bluetooth and WiFi/LAN printers
   useEffect(() => {
@@ -757,6 +814,95 @@ export default function SettingsScreen() {
               </ThemedText>
             </>
           )}
+        </View>
+
+        {/* AI Cost Tracking */}
+        <View style={styles.card}>
+          <ThemedText type="subtitle" style={styles.cardTitle}>AI Cost Tracking</ThemedText>
+          
+          <View style={{ gap: 12, marginTop: 8 }}>
+            {/* Today's Usage */}
+            <View style={{ padding: 12, backgroundColor: Colors[colorScheme ?? 'light'].tint + '10', borderRadius: 8 }}>
+              <ThemedText style={[styles.label, { marginBottom: 8 }]}>Today's Usage</ThemedText>
+              <View style={{ gap: 4 }}>
+                <ThemedText style={[styles.description, { fontSize: 13 }]}>
+                  Requests: {todayCost.requests}
+                </ThemedText>
+                <ThemedText style={[styles.description, { fontSize: 13 }]}>
+                  Tokens: {todayCost.tokens.toLocaleString()}
+                </ThemedText>
+                <ThemedText style={[styles.description, { fontSize: 13, fontWeight: '600' }]}>
+                  Cost: ${todayCost.cost.toFixed(6)}
+                </ThemedText>
+              </View>
+            </View>
+            
+            {/* Total Usage */}
+            <View style={{ padding: 12, backgroundColor: Colors[colorScheme ?? 'light'].tint + '10', borderRadius: 8 }}>
+              <ThemedText style={[styles.label, { marginBottom: 8 }]}>Total Usage</ThemedText>
+              <View style={{ gap: 4 }}>
+                <ThemedText style={[styles.description, { fontSize: 13 }]}>
+                  Total Requests: {totalUsage.totalRequests}
+                </ThemedText>
+                <ThemedText style={[styles.description, { fontSize: 13 }]}>
+                  Total Tokens: {totalUsage.totalTokens.toLocaleString()}
+                </ThemedText>
+                <ThemedText style={[styles.description, { fontSize: 13, fontWeight: '600' }]}>
+                  Total Cost: ${totalUsage.totalCost.toFixed(6)}
+                </ThemedText>
+                {Object.keys(totalUsage.byModel).length > 0 && (
+                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors[colorScheme ?? 'light'].tint + '30' }}>
+                    <ThemedText style={[styles.label, { fontSize: 12, marginBottom: 4 }]}>By Model:</ThemedText>
+                    {Object.entries(totalUsage.byModel).map(([model, stats]) => {
+                      const modelStats = stats as { requests: number; tokens: number; cost: number };
+                      return (
+                        <View key={model} style={{ marginLeft: 8, marginTop: 4 }}>
+                          <ThemedText style={[styles.description, { fontSize: 12 }]}>
+                            {model}: {modelStats.requests} requests, {modelStats.tokens.toLocaleString()} tokens, ${modelStats.cost.toFixed(6)}
+                          </ThemedText>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            </View>
+            
+            {/* Clear Button */}
+            <TouchableOpacity
+              onPress={handleClearUsageData}
+              style={[
+                styles.button,
+                {
+                  backgroundColor: colorScheme === 'dark'
+                    ? 'rgba(255, 59, 48, 0.2)'
+                    : 'rgba(255, 59, 48, 0.1)',
+                  marginTop: 8
+                }
+              ]}
+            >
+              <IconSymbol
+                name="trash.fill"
+                size={18}
+                color="#FF3B30"
+              />
+              <ThemedText
+                style={[
+                  styles.buttonText,
+                  {
+                    color: '#FF3B30',
+                    marginLeft: 6
+                  }
+                ]}
+              >
+                Clear Usage Data
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+          
+          <ThemedText style={[styles.previewHint, { marginTop: 8 }]}>
+            Cost tracking uses token counts from API responses when available, or estimates based on request/response sizes. Prices are estimates based on Google Gemini API pricing.
+          </ThemedText>
         </View>
 
         {/* Shop Info */}

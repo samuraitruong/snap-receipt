@@ -13,6 +13,7 @@ const IMAGE_OPTIMIZATION_RESIZE_WIDTH_KEY = '@snap_receipt:image_optimization_re
 const PRINT_COPIES_KEY = '@snap_receipt:print_copies';
 const PRINTER_TYPE_KEY = '@snap_receipt:printer_type';
 const CAMERA_ZOOM_KEY = '@snap_receipt:camera_zoom';
+const MULTI_PAGE_CAPTURE_KEY = '@snap_receipt:multi_page_capture';
 
 export type OCRMode = 'vision' | 'generative';
 export type PrintTemplateId = 'classic' | 'compact' | 'kitchen';
@@ -348,6 +349,30 @@ export async function setCameraZoom(zoom: number): Promise<void> {
     await AsyncStorage.setItem(CAMERA_ZOOM_KEY, String(clamped));
   } catch (error) {
     console.error('Error setting camera zoom:', error);
+  }
+}
+
+/**
+ * Get the multi-page capture setting
+ */
+export async function getMultiPageCapture(): Promise<boolean> {
+  try {
+    const value = await AsyncStorage.getItem(MULTI_PAGE_CAPTURE_KEY);
+    return value === 'true'; // Default to false
+  } catch (error) {
+    console.error('Error getting multi-page capture setting:', error);
+    return false;
+  }
+}
+
+/**
+ * Set the multi-page capture setting
+ */
+export async function setMultiPageCapture(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(MULTI_PAGE_CAPTURE_KEY, enabled ? 'true' : 'false');
+  } catch (error) {
+    console.error('Error setting multi-page capture setting:', error);
   }
 }
 

@@ -39,7 +39,7 @@ function getClient() {
 }
 
 /**
- * Initialize database - create receipts table if it doesn't exist
+ * Initialize database - create receipts and ai_usage tables if they don't exist
  */
 export async function initDatabase(): Promise<void> {
   if (!isDatabaseConfigured()) {
@@ -49,6 +49,8 @@ export async function initDatabase(): Promise<void> {
 
   try {
     const client = getClient();
+    
+    // Create receipts table
     await client.execute(`
       CREATE TABLE IF NOT EXISTS receipts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,6 +61,34 @@ export async function initDatabase(): Promise<void> {
         created_at TEXT DEFAULT (datetime('now'))
       )
     `);
+    
+    // Create ai_usage table for cost tracking
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS ai_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        total_tokens INTEGER NOT NULL,
+        estimated_cost REAL NOT NULL,
+        request_size INTEGER,
+        response_size INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    
+    // Create index on date for faster queries
+    await client.execute(`
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_date ON ai_usage(date)
+    `);
+    
+    // Create index on timestamp for faster queries
+    await client.execute(`
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_timestamp ON ai_usage(timestamp)
+    `);
+    
     console.log('Database initialized successfully');
   } catch (error) {
     console.error('Error initializing database:', error);
