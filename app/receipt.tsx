@@ -810,6 +810,9 @@ export default function ReceiptScreen() {
   };
 
   const { receiptData, isJson } = parseReceiptData();
+  const displayDateTime = formatDateTime();
+  const customerInfo = receiptData?.customer;
+  const hasCustomerInfo = !!(customerInfo && (customerInfo.name || customerInfo.phone));
 
   const formatReceiptText = (text: string) => {
     // Split text into lines and format as receipt
@@ -1056,6 +1059,15 @@ export default function ReceiptScreen() {
   const generateReceiptHTMLFromJSON = (receiptData: ReceiptData, orderNum: string | null): string => {
     const dateTimeStr = formatDateTime();
     const totals = calculateTotals(receiptData.total);
+    const customerDetails = receiptData.customer;
+    const hasCustomerDetails = !!(customerDetails && (customerDetails.name || customerDetails.phone));
+    const customerInfoHTML = hasCustomerDetails
+      ? `<div class="customer-info">
+          <div class="customer-label">Customer</div>
+          ${customerDetails?.name ? `<div class="customer-name">${escapeHTML(customerDetails.name)}</div>` : ''}
+          ${customerDetails?.phone ? `<div class="customer-phone">${escapeHTML(customerDetails.phone)}</div>` : ''}
+        </div>`
+      : '';
 
     let productsHTML = '';
     receiptData.items.forEach(item => {
@@ -1121,6 +1133,10 @@ export default function ReceiptScreen() {
               letter-spacing: 2px;
               margin-bottom: 8px;
             }
+            .shop-info {
+              text-align: center;
+              margin-bottom: 12px;
+            }
             .shop-name {
               font-size: 14px;
               font-weight: bold;
@@ -1136,6 +1152,36 @@ export default function ReceiptScreen() {
               font-size: 10px;
               color: #666;
               margin: 2px 0;
+            }
+            .order-customer-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              gap: 16px;
+              margin-top: 8px;
+              text-align: left;
+            }
+            .order-info {
+              flex: 1;
+            }
+            .customer-info {
+              min-width: 140px;
+              text-align: right;
+            }
+            .customer-label {
+              font-size: 10px;
+              letter-spacing: 0.5px;
+              text-transform: uppercase;
+              color: #666;
+              margin-bottom: 2px;
+            }
+            .customer-name {
+              font-size: 12px;
+              font-weight: 600;
+            }
+            .customer-phone {
+              font-size: 11px;
+              color: #666;
             }
             .divider {
               border-top: 1px solid #E5E5E5;
@@ -1163,10 +1209,15 @@ export default function ReceiptScreen() {
             <div class="divider"></div>
           </div>
           
-          <div style="text-align: center; margin-bottom: 12px;">
+          <div class="shop-info">
             <div class="shop-name">${escapeHTML(shopName || 'Pappas Ocean Catch')}</div>
-            ${orderNum ? `<div class="order-number">Order #: ${escapeHTML(orderNum)}</div>` : ''}
-            <div class="date-time">${escapeHTML(dateTimeStr)}</div>
+            <div class="order-customer-row">
+              <div class="order-info">
+                ${orderNum ? `<div class="order-number">Order #: ${escapeHTML(orderNum)}</div>` : ''}
+                <div class="date-time">${escapeHTML(dateTimeStr)}</div>
+              </div>
+              ${customerInfoHTML}
+            </div>
             <div class="divider"></div>
           </div>
           
@@ -1444,24 +1495,27 @@ export default function ReceiptScreen() {
           {/* Shop Information Section */}
           <View style={styles.shopInfoSection}>
             <ThemedText type="subtitle" style={styles.shopName}>Pappa's Ocean Catch</ThemedText>
-            {orderNumber && (
-              <ThemedText style={[styles.orderNumber, { color: tertiaryText }]}>Order: #{orderNumber}</ThemedText>
-            )}
-            <ThemedText style={[styles.dateTime, { color: secondaryText }]}>
-              {(() => {
-                const currentDate = new Date();
-                const weekday = currentDate.toLocaleDateString('en-US', { weekday: 'short' });
-                const day = currentDate.getDate().toString().padStart(2, '0');
-                const month = (currentDate.getMonth() + 1).toString().padStart(2, '0');
-                const year = currentDate.getFullYear();
-                const timeStr = currentDate.toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: true
-                });
-                return `${weekday}, ${day}/${month}/${year} ${timeStr}`;
-              })()}
-            </ThemedText>
+            <View style={styles.orderCustomerRow}>
+              <View style={styles.orderInfo}>
+                {orderNumber && (
+                  <ThemedText style={[styles.orderNumber, { color: tertiaryText }]}>Order: #{orderNumber}</ThemedText>
+                )}
+                <ThemedText style={[styles.dateTime, { color: secondaryText }]}>
+                  {displayDateTime}
+                </ThemedText>
+              </View>
+              {hasCustomerInfo && (
+                <View style={styles.customerInfo}>
+                  <ThemedText style={[styles.customerLabel, { color: secondaryText }]}>Customer</ThemedText>
+                  {customerInfo?.name && (
+                    <ThemedText style={styles.customerName}>{customerInfo.name}</ThemedText>
+                  )}
+                  {customerInfo?.phone && (
+                    <ThemedText style={[styles.customerPhone, { color: secondaryText }]}>{customerInfo.phone}</ThemedText>
+                  )}
+                </View>
+              )}
+            </View>
             <View style={[styles.divider, { backgroundColor: borderColor }]} />
           </View>
 
@@ -1826,6 +1880,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
     paddingVertical: 12,
+    alignSelf: 'stretch',
+    width: '100%',
   },
   shopName: {
     fontSize: 20,
@@ -1842,6 +1898,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 12,
+  },
+  orderCustomerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    width: '100%',
+    marginTop: 8,
+  },
+  orderInfo: {
+    flex: 1,
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  customerInfo: {
+    minWidth: 140,
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  customerLabel: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    textAlign: 'right',
+  },
+  customerName: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  customerPhone: {
+    fontSize: 14,
+    textAlign: 'right',
   },
   divider: {
     width: '100%',

@@ -73,9 +73,15 @@ export interface ReceiptItem {
   modifiers?: string[]; // Optional array of modifier strings
 }
 
+export interface ReceiptCustomer {
+  name?: string;
+  phone?: string;
+}
+
 export interface ReceiptData {
   items: ReceiptItem[];
   total: number; // Total price (GST inclusive)
+  customer?: ReceiptCustomer; // Optional customer info
 }
 
 /**
@@ -134,7 +140,14 @@ CRITICAL EXTRACTION RULES - STRICT PARSING ONLY:
    - If a product has NO modifiers visible in the receipt image, you MUST omit the modifiers field completely (do not include an empty array)
    - Only include modifiers if they are clearly written/printed on the receipt
 
-5. Return Format:
+5. Customer Information (OPTIONAL):
+   - If the receipt clearly shows a customer name and/or phone number (e.g., loyalty info), capture it.
+   - Only record details that are explicitly printed on the receipt (e.g., "Customer: Jane Doe", "Phone: 0400 123 456").
+   - Do NOT invent or infer customer details that are not visible.
+   - Return customer info under a "customer" object with "name" and/or "phone" keys.
+   - If only one field is present, include just that field. If no customer info exists, omit the "customer" object entirely.
+
+6. Return Format:
    - Return ONLY valid JSON, no explanations or comments
    - Use this exact structure:
      {
@@ -146,14 +159,19 @@ CRITICAL EXTRACTION RULES - STRICT PARSING ONLY:
            "modifiers": ["No onions", "Extra cheese"]
          }
        ],
-       "total": 110.00
+       "total": 110.00,
+       "customer": {
+         "name": "Jane Doe",
+         "phone": "0400 123 456"
+       }
      }
    - All prices should be numbers (not strings)
    - All quantities should be numbers (not strings)
    - Product names should be strings
    - Modifiers should be an array of strings (or omit if empty)
+   - The "customer" object is optional and should only be present when at least one customer field exists
 
-Example JSON output (only include modifiers if they are visible in the receipt):
+Example JSON output (only include modifiers if they are visible in the receipt, and only include customer info when it exists on the receipt):
 {
   "items": [
     {
@@ -174,7 +192,11 @@ Example JSON output (only include modifiers if they are visible in the receipt):
       "price": 15.50
     }
   ],
-  "total": 110.00
+  "total": 110.00,
+  "customer": {
+    "name": "Jane Doe",
+    "phone": "0400 123 456"
+  }
 }
 
 Note: In the example above, modifiers are only shown IF they are visible in the receipt. If FRIES had no modifiers visible, do not add any modifiers field for it.
@@ -190,6 +212,7 @@ KEY POINTS:
 - Each product with different modifiers or price is a separate item
 - Return ONLY the JSON, no other text
 - Be strict: only parse what you see, don't add anything
+- Customer info is optional; include it ONLY when name and/or phone are clearly printed
 
 JSON response:`;
 
@@ -293,11 +316,19 @@ JSON response:`;
       }).length;
       const responseSize = responseText.length;
       
+      // Calculate total image size for better estimation if token usage is not available
+      const totalImageSize = images.reduce((sum, img) => {
+        const imgData = img.startsWith('data:') ? img.split(',')[1] : img;
+        return sum + imgData.length;
+      }, 0);
+      
       const usage = await recordAPIUsage(
         MODEL_ID,
         tokenUsage,
         requestSize,
-        responseSize
+        responseSize,
+        prompt.length, // Pass prompt text length
+        totalImageSize // Pass total image size for better estimation
       );
       
       console.log('AI API Cost:', {
@@ -343,6 +374,27 @@ JSON response:`;
       }
       if (typeof receiptData.total !== 'number') {
         throw new Error('Invalid JSON structure: total is not a number');
+      }
+      if (receiptData.customer !== undefined) {
+        if (
+          receiptData.customer === null ||
+          typeof receiptData.customer !== 'object' ||
+          Array.isArray(receiptData.customer)
+        ) {
+          throw new Error('Invalid JSON structure: customer must be an object when provided');
+        }
+        if (
+          receiptData.customer.name !== undefined &&
+          typeof receiptData.customer.name !== 'string'
+        ) {
+          throw new Error('Invalid JSON structure: customer.name must be a string');
+        }
+        if (
+          receiptData.customer.phone !== undefined &&
+          typeof receiptData.customer.phone !== 'string'
+        ) {
+          throw new Error('Invalid JSON structure: customer.phone must be a string');
+        }
       }
       
       // Validate items

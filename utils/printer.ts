@@ -101,6 +101,16 @@ export async function printReceiptAsText(
   const settings = getTemplateSettings(template);
   const lineWidth = settings.lineWidth;
   const divider = settings.dividerChar.repeat(lineWidth);
+  const formatColumns = (left: string, right?: string) => {
+    const leftText = left || '';
+    const rightText = right || '';
+    if (!rightText) {
+      return `${leftText}\n`;
+    }
+    const padding = Math.max(1, lineWidth - leftText.length - rightText.length);
+    const spaces = padding > 0 ? ' '.repeat(padding) : ' ';
+    return `${leftText}${spaces}${rightText}\n`;
+  };
 
   try {
     // Set alignment to center for header
@@ -120,14 +130,18 @@ export async function printReceiptAsText(
     await printer.addText(`${shopName || 'Pappa\'s Ocean Catch'}\n`);
     await printer.addFeedLine(1);
 
-    // Print order number if available
-    if (orderNumber) {
-      await printer.addText(`Order #: ${orderNumber}\n`);
+    const dateTimeStr = formatDateTime();
+    const customerDetails = receiptData?.customer;
+    const customerNameText = customerDetails?.name ? `Customer: ${customerDetails.name}` : '';
+    const customerPhoneText = customerDetails?.phone ? `Phone: ${customerDetails.phone}` : '';
+    const orderLineText = orderNumber ? `Order #: ${orderNumber}` : '';
+
+    if (orderLineText || customerNameText) {
+      await printer.addText(formatColumns(orderLineText, customerNameText || undefined));
     }
 
-    // Print date/time
-    const dateTimeStr = formatDateTime();
-    await printer.addText(`${dateTimeStr}\n`);
+    await printer.addText(formatColumns(dateTimeStr, customerPhoneText || undefined));
+    
     await printer.addFeedLine(settings.feedLinesAfterItems);
 
     // Print divider

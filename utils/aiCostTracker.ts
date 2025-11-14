@@ -6,8 +6,8 @@
  * Uses Turso (cloud SQLite) database for storage
  */
 
-import { getLocalDateString } from './database';
 import { createClient } from '@libsql/client/web';
+import { getLocalDateString } from './database';
 
 const TURSO_URL = process.env.EXPO_PUBLIC_TURSO_URL || '';
 const TURSO_TOKEN = process.env.EXPO_PUBLIC_TURSO_TOKEN || '';
@@ -119,16 +119,31 @@ export function estimateTokensFromSize(
   // Estimate input tokens
   let inputTokens = Math.ceil(promptText.length / 4); // ~4 chars per token
   
-  // Estimate image tokens (very rough)
-  // Gemini processes images, roughly: 256 tokens per 256x256 tile
-  // For a typical receipt image (compressed), estimate ~1000-2000 tokens
+  // Estimate image tokens (very rough - actual tokens depend on resolution, not file size)
+  // Gemini processes images in 256x256 tiles, each tile = 256 tokens
+  // For a typical receipt image:
+  // - If 1024x2048 pixels = 4x8 tiles = 32 tiles = ~8,192 tokens
+  // - If 512x1024 pixels = 2x4 tiles = 8 tiles = ~2,048 tokens
+  // - We estimate based on file size as a proxy for resolution
   if (imageBase64) {
     const imageSize = imageBase64.length;
     // Base64 is ~33% larger than binary, so estimate actual image size
     const estimatedImageSize = (imageSize * 3) / 4;
-    // Rough estimate: 1 token per ~100 bytes of image data
-    const imageTokens = Math.ceil(estimatedImageSize / 100);
+    
+    // Very rough estimate: assume ~1-2KB per tile
+    // For a 100KB image, estimate ~50-100 tiles = ~12,800-25,600 tokens
+    // This is conservative - actual tokens may be higher for high-res images
+    const estimatedTiles = Math.ceil(estimatedImageSize / 2000); // ~2KB per tile
+    const imageTokens = estimatedTiles * 256; // 256 tokens per tile
+    
     inputTokens += imageTokens;
+    
+    console.log('Image token estimation:', {
+      imageSizeBytes: estimatedImageSize,
+      estimatedTiles,
+      estimatedImageTokens: imageTokens,
+      note: 'Actual tokens depend on image resolution, not file size. This is a rough estimate.'
+    });
   }
   
   // Estimate output tokens (JSON response, typically 200-500 tokens)
@@ -160,7 +175,9 @@ export async function recordAPIUsage(
   model: string,
   tokenUsage: TokenUsage | null,
   requestSize?: number,
-  responseSize?: number
+  responseSize?: number,
+  promptTextLength?: number,
+  totalImageSize?: number
 ): Promise<APIUsage> {
   if (!isDatabaseConfigured()) {
     console.warn('Database not configured, skipping API usage recording');
@@ -182,16 +199,35 @@ export async function recordAPIUsage(
   let totalTokens = 0;
   
   if (tokenUsage) {
+    // Use actual token counts from API (includes image tokens in promptTokens)
     inputTokens = tokenUsage.promptTokens || 0;
     outputTokens = tokenUsage.candidatesTokens || 0;
     totalTokens = tokenUsage.totalTokens || 0;
+    
+    console.log('Using API token counts (includes image tokens):', {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      note: 'promptTokens already includes both text prompt and image tokens'
+    });
   } else {
     // Estimate if token usage not available
-    // This is a rough estimate - actual tokens may vary
-    const estimated = estimateTokensFromSize('', '');
+    // Use provided prompt text and image size for better estimation
+    const promptText = promptTextLength ? 'x'.repeat(promptTextLength) : '';
+    const imageBase64 = totalImageSize ? 'x'.repeat(Math.floor(totalImageSize * 4 / 3)) : undefined; // Approximate base64 size
+    const estimated = estimateTokensFromSize(promptText, imageBase64);
     inputTokens = estimated.inputTokens;
     outputTokens = estimated.outputTokens;
     totalTokens = inputTokens + outputTokens;
+    
+    console.warn('Token usage not available from API, using estimation:', {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      promptLength: promptTextLength || 0,
+      imageSize: totalImageSize || 0,
+      note: 'This is a rough estimate. Actual tokens may vary significantly, especially for images.'
+    });
   }
   
   const estimatedCost = calculateCost(inputTokens, outputTokens, model);

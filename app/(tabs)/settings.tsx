@@ -3,12 +3,12 @@ import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { clearUsageData, getTodayCostSummary, getTotalUsage } from '@/utils/aiCostTracker';
 import { formatDateTime } from '@/utils/printer';
 import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getImageOptimization, getImageOptimizationQuality, getImageOptimizationResizeWidth, getOCRMode, getPrintCopies, getPrinterType, getPrintMargin, getPrintTemplate, getShopName, OCRMode, PrinterType, setAutoPrinter, setAutoSave, setEpsonPrinterMac, setImageOptimization, setImageOptimizationQuality, setImageOptimizationResizeWidth, setOCRMode, setPrintCopies, setPrinterType, setPrintMargin, setPrintTemplate, setShopName, type PrintTemplateId } from '@/utils/settings';
-import { getTodayCostSummary, getTotalUsage, clearUsageData } from '@/utils/aiCostTracker';
 import * as Print from 'expo-print';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, findNodeHandle, Platform, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, findNodeHandle, Modal, Platform, ScrollView, StyleSheet, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Lazy require WebView to avoid dependency issues if not installed
 let WebView: any;
@@ -48,6 +48,7 @@ export default function SettingsScreen() {
   const [isTestPrinting, setIsTestPrinting] = useState(false);
   const [todayCost, setTodayCost] = useState({ requests: 0, tokens: 0, cost: 0 });
   const [totalUsage, setTotalUsage] = useState({ totalRequests: 0, totalTokens: 0, totalCost: 0, byModel: {} });
+  const [showCostModal, setShowCostModal] = useState(false);
   const previewViewRef = useRef<View>(null);
   
   // Use the library's discovery hook - it handles everything automatically
@@ -191,10 +192,26 @@ export default function SettingsScreen() {
             setTodayCost(todaySummary);
             setTotalUsage(totalStats);
             Alert.alert('Success', 'Usage data cleared');
+            setShowCostModal(false); // Close modal after clearing
           },
         },
       ]
     );
+  };
+
+  const handleOpenCostModal = async () => {
+    // Refresh cost data when opening modal
+    try {
+      const [todaySummary, totalStats] = await Promise.all([
+        getTodayCostSummary(),
+        getTotalUsage(),
+      ]);
+      setTodayCost(todaySummary);
+      setTotalUsage(totalStats);
+    } catch (error) {
+      console.error('Error refreshing cost data:', error);
+    }
+    setShowCostModal(true);
   };
 
   // Auto-start discovery when hook is available - search for both Bluetooth and WiFi/LAN printers
@@ -722,6 +739,145 @@ export default function SettingsScreen() {
 
   return (
     <ThemedView style={styles.container}>
+      {/* AI Cost Tracking Modal */}
+      <Modal
+        visible={showCostModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowCostModal(false)}
+      >
+        <ThemedView style={styles.modalContainer}>
+          <View style={[styles.modalHeader, { borderBottomColor: Colors[colorScheme ?? 'light'].tint + '30' }]}>
+            <ThemedText type="title" style={styles.modalTitle}>AI Cost Tracking</ThemedText>
+            <TouchableOpacity
+              onPress={() => setShowCostModal(false)}
+              style={[styles.modalCloseButton, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '20' }]}
+            >
+              <IconSymbol name="xmark" size={20} color={Colors[colorScheme ?? 'light'].tint} />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.modalContent} contentContainerStyle={styles.modalContentContainer}>
+            <View style={{ gap: 16 }}>
+              {/* Today's Usage */}
+              <View style={[styles.costCard, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '10' }]}>
+                <ThemedText style={[styles.label, { marginBottom: 12, fontSize: 16 }]}>Today's Usage</ThemedText>
+                <View style={{ gap: 8 }}>
+                  <View style={styles.costRow}>
+                    <ThemedText style={[styles.description, { fontSize: 14 }]}>Requests:</ThemedText>
+                    <ThemedText style={[styles.description, { fontSize: 14, fontWeight: '600' }]}>
+                      {todayCost.requests}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.costRow}>
+                    <ThemedText style={[styles.description, { fontSize: 14 }]}>Tokens:</ThemedText>
+                    <ThemedText style={[styles.description, { fontSize: 14, fontWeight: '600' }]}>
+                      {todayCost.tokens.toLocaleString()}
+                    </ThemedText>
+                  </View>
+                  <View style={[styles.costRow, { marginTop: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors[colorScheme ?? 'light'].tint + '30' }]}>
+                    <ThemedText style={[styles.description, { fontSize: 16, fontWeight: '700' }]}>Cost:</ThemedText>
+                    <ThemedText style={[styles.description, { fontSize: 16, fontWeight: '700', color: Colors[colorScheme ?? 'light'].tint }]}>
+                      ${todayCost.cost.toFixed(6)}
+                    </ThemedText>
+                  </View>
+                </View>
+              </View>
+              
+              {/* Total Usage */}
+              <View style={[styles.costCard, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '10' }]}>
+                <ThemedText style={[styles.label, { marginBottom: 12, fontSize: 16 }]}>Total Usage</ThemedText>
+                <View style={{ gap: 8 }}>
+                  <View style={styles.costRow}>
+                    <ThemedText style={[styles.description, { fontSize: 14 }]}>Total Requests:</ThemedText>
+                    <ThemedText style={[styles.description, { fontSize: 14, fontWeight: '600' }]}>
+                      {totalUsage.totalRequests}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.costRow}>
+                    <ThemedText style={[styles.description, { fontSize: 14 }]}>Total Tokens:</ThemedText>
+                    <ThemedText style={[styles.description, { fontSize: 14, fontWeight: '600' }]}>
+                      {totalUsage.totalTokens.toLocaleString()}
+                    </ThemedText>
+                  </View>
+                  <View style={[styles.costRow, { marginTop: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors[colorScheme ?? 'light'].tint + '30' }]}>
+                    <ThemedText style={[styles.description, { fontSize: 16, fontWeight: '700' }]}>Total Cost:</ThemedText>
+                    <ThemedText style={[styles.description, { fontSize: 16, fontWeight: '700', color: Colors[colorScheme ?? 'light'].tint }]}>
+                      ${totalUsage.totalCost.toFixed(6)}
+                    </ThemedText>
+                  </View>
+                  
+                  {Object.keys(totalUsage.byModel).length > 0 && (
+                    <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors[colorScheme ?? 'light'].tint + '30' }}>
+                      <ThemedText style={[styles.label, { fontSize: 14, marginBottom: 8 }]}>By Model:</ThemedText>
+                      {Object.entries(totalUsage.byModel).map(([model, stats]) => {
+                        const modelStats = stats as { requests: number; tokens: number; cost: number };
+                        return (
+                          <View key={model} style={[styles.modelStatsCard, { backgroundColor: Colors[colorScheme ?? 'light'].tint + '05', marginTop: 8 }]}>
+                            <ThemedText style={[styles.description, { fontSize: 13, fontWeight: '600', marginBottom: 4 }]}>
+                              {model}
+                            </ThemedText>
+                            <View style={styles.costRow}>
+                              <ThemedText style={[styles.description, { fontSize: 12 }]}>Requests:</ThemedText>
+                              <ThemedText style={[styles.description, { fontSize: 12 }]}>{modelStats.requests}</ThemedText>
+                            </View>
+                            <View style={styles.costRow}>
+                              <ThemedText style={[styles.description, { fontSize: 12 }]}>Tokens:</ThemedText>
+                              <ThemedText style={[styles.description, { fontSize: 12 }]}>{modelStats.tokens.toLocaleString()}</ThemedText>
+                            </View>
+                            <View style={styles.costRow}>
+                              <ThemedText style={[styles.description, { fontSize: 12 }]}>Cost:</ThemedText>
+                              <ThemedText style={[styles.description, { fontSize: 12, fontWeight: '600' }]}>
+                                ${modelStats.cost.toFixed(6)}
+                              </ThemedText>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              </View>
+              
+              {/* Clear Button */}
+              <TouchableOpacity
+                onPress={handleClearUsageData}
+                style={[
+                  styles.button,
+                  {
+                    backgroundColor: colorScheme === 'dark'
+                      ? 'rgba(255, 59, 48, 0.2)'
+                      : 'rgba(255, 59, 48, 0.1)',
+                    marginTop: 8
+                  }
+                ]}
+              >
+                <IconSymbol
+                  name="trash.fill"
+                  size={18}
+                  color="#FF3B30"
+                />
+                <ThemedText
+                  style={[
+                    styles.buttonText,
+                    {
+                      color: '#FF3B30',
+                      marginLeft: 6
+                    }
+                  ]}
+                >
+                  Clear Usage Data
+                </ThemedText>
+              </TouchableOpacity>
+              
+              <ThemedText style={[styles.previewHint, { marginTop: 8, textAlign: 'center' }]}>
+                Cost tracking uses token counts from API responses when available, or estimates based on request/response sizes. Prices are estimates based on Google Gemini API pricing.
+              </ThemedText>
+            </View>
+          </ScrollView>
+        </ThemedView>
+      </Modal>
+
       <ScrollView 
         contentContainerStyle={[
           styles.content,
@@ -814,95 +970,37 @@ export default function SettingsScreen() {
               </ThemedText>
             </>
           )}
-        </View>
-
-        {/* AI Cost Tracking */}
-        <View style={styles.card}>
-          <ThemedText type="subtitle" style={styles.cardTitle}>AI Cost Tracking</ThemedText>
           
-          <View style={{ gap: 12, marginTop: 8 }}>
-            {/* Today's Usage */}
-            <View style={{ padding: 12, backgroundColor: Colors[colorScheme ?? 'light'].tint + '10', borderRadius: 8 }}>
-              <ThemedText style={[styles.label, { marginBottom: 8 }]}>Today's Usage</ThemedText>
-              <View style={{ gap: 4 }}>
-                <ThemedText style={[styles.description, { fontSize: 13 }]}>
-                  Requests: {todayCost.requests}
-                </ThemedText>
-                <ThemedText style={[styles.description, { fontSize: 13 }]}>
-                  Tokens: {todayCost.tokens.toLocaleString()}
-                </ThemedText>
-                <ThemedText style={[styles.description, { fontSize: 13, fontWeight: '600' }]}>
-                  Cost: ${todayCost.cost.toFixed(6)}
-                </ThemedText>
-              </View>
-            </View>
-            
-            {/* Total Usage */}
-            <View style={{ padding: 12, backgroundColor: Colors[colorScheme ?? 'light'].tint + '10', borderRadius: 8 }}>
-              <ThemedText style={[styles.label, { marginBottom: 8 }]}>Total Usage</ThemedText>
-              <View style={{ gap: 4 }}>
-                <ThemedText style={[styles.description, { fontSize: 13 }]}>
-                  Total Requests: {totalUsage.totalRequests}
-                </ThemedText>
-                <ThemedText style={[styles.description, { fontSize: 13 }]}>
-                  Total Tokens: {totalUsage.totalTokens.toLocaleString()}
-                </ThemedText>
-                <ThemedText style={[styles.description, { fontSize: 13, fontWeight: '600' }]}>
-                  Total Cost: ${totalUsage.totalCost.toFixed(6)}
-                </ThemedText>
-                {Object.keys(totalUsage.byModel).length > 0 && (
-                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: Colors[colorScheme ?? 'light'].tint + '30' }}>
-                    <ThemedText style={[styles.label, { fontSize: 12, marginBottom: 4 }]}>By Model:</ThemedText>
-                    {Object.entries(totalUsage.byModel).map(([model, stats]) => {
-                      const modelStats = stats as { requests: number; tokens: number; cost: number };
-                      return (
-                        <View key={model} style={{ marginLeft: 8, marginTop: 4 }}>
-                          <ThemedText style={[styles.description, { fontSize: 12 }]}>
-                            {model}: {modelStats.requests} requests, {modelStats.tokens.toLocaleString()} tokens, ${modelStats.cost.toFixed(6)}
-                          </ThemedText>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
-              </View>
-            </View>
-            
-            {/* Clear Button */}
-            <TouchableOpacity
-              onPress={handleClearUsageData}
+          {/* View Cost Details Button */}
+          <TouchableOpacity
+            onPress={handleOpenCostModal}
+            style={[
+              styles.button,
+              {
+                backgroundColor: colorScheme === 'dark'
+                  ? 'rgba(255, 255, 255, 0.1)'
+                  : Colors[colorScheme ?? 'light'].tint + '20',
+                marginTop: 16
+              }
+            ]}
+          >
+            <IconSymbol
+              name="chart.bar.fill"
+              size={18}
+              color={colorScheme === 'dark' ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].tint}
+            />
+            <ThemedText
               style={[
-                styles.button,
+                styles.buttonText,
                 {
-                  backgroundColor: colorScheme === 'dark'
-                    ? 'rgba(255, 59, 48, 0.2)'
-                    : 'rgba(255, 59, 48, 0.1)',
-                  marginTop: 8
+                  color: colorScheme === 'dark' ? Colors[colorScheme ?? 'light'].tint : Colors[colorScheme ?? 'light'].tint,
+                  marginLeft: 6
                 }
               ]}
             >
-              <IconSymbol
-                name="trash.fill"
-                size={18}
-                color="#FF3B30"
-              />
-              <ThemedText
-                style={[
-                  styles.buttonText,
-                  {
-                    color: '#FF3B30',
-                    marginLeft: 6
-                  }
-                ]}
-              >
-                Clear Usage Data
-              </ThemedText>
-            </TouchableOpacity>
-          </View>
-          
-          <ThemedText style={[styles.previewHint, { marginTop: 8 }]}>
-            Cost tracking uses token counts from API responses when available, or estimates based on request/response sizes. Prices are estimates based on Google Gemini API pricing.
-          </ThemedText>
+              View Cost Details
+            </ThemedText>
+          </TouchableOpacity>
         </View>
 
         {/* Shop Info */}
@@ -1453,6 +1551,53 @@ const styles = StyleSheet.create({
   },
   printerTypeButtonTextActive: {
     color: '#fff',
+  },
+  modalContainer: {
+    flex: 1,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    paddingTop: Platform.OS === 'ios' ? 60 : 20,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  modalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalContent: {
+    flex: 1,
+  },
+  modalContentContainer: {
+    padding: 20,
+    paddingBottom: 40,
+  },
+  costCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(10, 126, 164, 0.2)',
+  },
+  costRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modelStatsCard: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(10, 126, 164, 0.15)',
   },
 });
 

@@ -43,6 +43,8 @@ const MAPPING = {
   'trash.fill': 'delete',
   'doc.on.doc': 'description',
   'doc.on.doc.fill': 'description',
+  'chart.bar.fill': 'bar-chart',
+  'xmark': 'close',
 } as IconMapping;
 
 /**
