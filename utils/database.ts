@@ -58,9 +58,22 @@ export async function initDatabase(): Promise<void> {
         total_price REAL NOT NULL,
         receipt_data TEXT NOT NULL,
         order_number TEXT,
+        is_paid INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
       )
     `);
+    
+    // Add is_paid column if it doesn't exist (migration for existing databases)
+    try {
+      await client.execute(`
+        ALTER TABLE receipts ADD COLUMN is_paid INTEGER DEFAULT 0
+      `);
+    } catch (e: any) {
+      // Column already exists, ignore error
+      if (!e?.message?.includes('duplicate column')) {
+        console.warn('Error adding is_paid column (may already exist):', e);
+      }
+    }
     
     // Create ai_usage table for cost tracking
     await client.execute(`
@@ -105,6 +118,7 @@ export interface ReceiptRecord {
   total_price: number;
   receipt_data: string; // JSON stringified receipt data
   order_number?: string;
+  is_paid?: boolean;
   created_at?: string;
 }
 
@@ -120,14 +134,15 @@ export async function saveReceipt(receipt: Omit<ReceiptRecord, 'id' | 'created_a
     const client = getClient();
     const result = await client.execute({
       sql: `
-        INSERT INTO receipts (date, total_price, receipt_data, order_number)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO receipts (date, total_price, receipt_data, order_number, is_paid)
+        VALUES (?, ?, ?, ?, ?)
       `,
       args: [
         receipt.date,
         receipt.total_price,
         receipt.receipt_data,
         receipt.order_number || null,
+        receipt.is_paid ? 1 : 0,
       ],
     });
     
@@ -163,6 +178,7 @@ export async function getReceiptsByDate(date: string): Promise<ReceiptRecord[]> 
       total_price: Number(row.total_price),
       receipt_data: String(row.receipt_data),
       order_number: row.order_number ? String(row.order_number) : undefined,
+      is_paid: row.is_paid ? Boolean(row.is_paid) : false,
       created_at: row.created_at ? String(row.created_at) : undefined,
     }));
   } catch (error) {
@@ -198,6 +214,7 @@ export async function getTodayReceipts(limit: number = 5): Promise<ReceiptRecord
       total_price: Number(row.total_price),
       receipt_data: String(row.receipt_data),
       order_number: row.order_number ? String(row.order_number) : undefined,
+      is_paid: row.is_paid ? Boolean(row.is_paid) : false,
       created_at: row.created_at ? String(row.created_at) : undefined,
     }));
   } catch (error) {
@@ -231,6 +248,7 @@ export async function getRecentReceipts(limit: number = 5): Promise<ReceiptRecor
       total_price: Number(row.total_price),
       receipt_data: String(row.receipt_data),
       order_number: row.order_number ? String(row.order_number) : undefined,
+      is_paid: row.is_paid ? Boolean(row.is_paid) : false,
       created_at: row.created_at ? String(row.created_at) : undefined,
     }));
   } catch (error) {
@@ -262,6 +280,7 @@ export async function getAllReceipts(): Promise<ReceiptRecord[]> {
       total_price: Number(row.total_price),
       receipt_data: String(row.receipt_data),
       order_number: row.order_number ? String(row.order_number) : undefined,
+      is_paid: row.is_paid ? Boolean(row.is_paid) : false,
       created_at: row.created_at ? String(row.created_at) : undefined,
     }));
   } catch (error) {
@@ -292,6 +311,68 @@ export async function getAvailableDates(): Promise<string[]> {
   } catch (error) {
     console.error('Error getting available dates:', error);
     return [];
+  }
+}
+
+/**
+ * Get receipt by ID
+ */
+export async function getReceiptById(receiptId: number): Promise<ReceiptRecord | null> {
+  if (!isDatabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const client = getClient();
+    const result = await client.execute({
+      sql: `
+        SELECT * FROM receipts 
+        WHERE id = ?
+      `,
+      args: [receiptId],
+    });
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: Number(row.id),
+      date: String(row.date),
+      total_price: Number(row.total_price),
+      receipt_data: String(row.receipt_data),
+      order_number: row.order_number ? String(row.order_number) : undefined,
+      is_paid: row.is_paid ? Boolean(row.is_paid) : false,
+      created_at: row.created_at ? String(row.created_at) : undefined,
+    };
+  } catch (error) {
+    console.error('Error getting receipt by ID:', error);
+    return null;
+  }
+}
+
+/**
+ * Update payment status for a receipt
+ */
+export async function updateReceiptPaymentStatus(receiptId: number, isPaid: boolean): Promise<void> {
+  if (!isDatabaseConfigured()) {
+    throw new Error('Database not configured');
+  }
+
+  try {
+    const client = getClient();
+    await client.execute({
+      sql: `
+        UPDATE receipts 
+        SET is_paid = ?
+        WHERE id = ?
+      `,
+      args: [isPaid ? 1 : 0, receiptId],
+    });
+  } catch (error) {
+    console.error('Error updating receipt payment status:', error);
+    throw error;
   }
 }
 

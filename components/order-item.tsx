@@ -6,6 +6,7 @@ import { StyleSheet, TouchableOpacity, View } from 'react-native';
 interface OrderItemProps {
   receipt: ReceiptRecord;
   onPress: (receipt: ReceiptRecord) => void;
+  onTogglePaid?: (receiptId: number, isPaid: boolean) => void;
   cardBackground?: string;
   borderColor?: string;
   secondaryText?: string;
@@ -52,11 +53,14 @@ function formatTime(dateStr: string): string {
 export function OrderItem({ 
   receipt, 
   onPress, 
+  onTogglePaid,
   cardBackground, 
   borderColor, 
   secondaryText,
   tintColor 
 }: OrderItemProps) {
+  const isPaid = receipt.is_paid || false;
+  
   return (
     <TouchableOpacity
       onPress={() => onPress(receipt)}
@@ -76,17 +80,42 @@ export function OrderItem({
               </ThemedText>
             )}
           </View>
-          {receipt.order_number && (
-            <ThemedText style={[styles.receiptOrder, secondaryText && { color: secondaryText }]}>
-              Order #{receipt.order_number}
-            </ThemedText>
-          )}
+          <View style={styles.receiptBottomRow}>
+            {receipt.order_number && (
+              <ThemedText style={[styles.receiptOrder, secondaryText && { color: secondaryText }]}>
+                Order #{receipt.order_number}
+              </ThemedText>
+            )}
+            <View style={[styles.paymentStatusBadge, { backgroundColor: isPaid ? '#D1FAE5' : '#FEE2E2' }]}>
+              <ThemedText style={[styles.paymentStatusText, { color: isPaid ? '#065F46' : '#991B1B' }]}>
+                {isPaid ? 'PAID' : 'Unpaid'}
+              </ThemedText>
+            </View>
+          </View>
         </View>
-        <IconSymbol 
-          name="chevron.right" 
-          size={20} 
-          color={secondaryText || '#999999'} 
-        />
+        <View style={styles.receiptActions}>
+          {onTogglePaid && receipt.id && (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                onTogglePaid(receipt.id!, !isPaid);
+              }}
+              style={[styles.paidToggleButton, { backgroundColor: (isPaid ? '#4CAF50' : '#DC2626') + '20' }]}
+              hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+            >
+              <IconSymbol 
+                name={isPaid ? "checkmark.circle.fill" : "xmark.circle.fill"} 
+                size={20} 
+                color={isPaid ? '#4CAF50' : '#DC2626'} 
+              />
+            </TouchableOpacity>
+          )}
+          <IconSymbol 
+            name="chevron.right" 
+            size={20} 
+            color={secondaryText || '#999999'} 
+          />
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -121,8 +150,36 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 2,
   },
+  receiptBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
   receiptTimeText: {
     fontSize: 12,
+  },
+  receiptActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  paidToggleButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  paymentStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  paymentStatusText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
 });
 

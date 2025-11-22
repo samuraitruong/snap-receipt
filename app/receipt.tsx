@@ -2,14 +2,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { getLocalDateString, initDatabase, saveReceipt } from '@/utils/database';
+import { getLocalDateString, getReceiptById, initDatabase, saveReceipt, updateReceiptPaymentStatus } from '@/utils/database';
 import { ReceiptData } from '@/utils/ocr';
 import { calculateTotals, formatDateTime, printReceiptAsText } from '@/utils/printer';
 import { getAutoPrinter, getAutoSave, getEpsonPrinterMac, getPrintCopies, getPrintMargin, getPrintTemplate, getPrinterType, getShopName, type PrintTemplateId } from '@/utils/settings';
 import { Image } from 'expo-image';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View, findNodeHandle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,7 +20,9 @@ export default function ReceiptScreen() {
   const extractedText = params.extractedText ? decodeURIComponent(params.extractedText as string) : '';
   const extractedDataType = params.extractedDataType as 'json' | 'text' | undefined;
   const orderNumber = params.orderNumber ? params.orderNumber as string : null;
+  const receiptId = params.receiptId ? Number(params.receiptId) : null;
   const isExistingReceipt = params.isExistingReceipt === 'true' || (Array.isArray(params.isExistingReceipt) && params.isExistingReceipt[0] === 'true');
+  const initialPaidStatus = params.isPaid === 'true' || (Array.isArray(params.isPaid) && params.isPaid[0] === 'true');
   const [isPrinting, setIsPrinting] = useState(false);
   const [isEpsonPrinting, setIsEpsonPrinting] = useState(false);
   const [isPrintingToAll, setIsPrintingToAll] = useState(false);
@@ -28,6 +30,7 @@ export default function ReceiptScreen() {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const printViewRef = useRef<View>(null);
   const autoPrintAttemptedRef = useRef(false);
+  const mismatchAlertShownRef = useRef(false);
 
   // Optional discovery hook wrapper: use library hook when available, else no-op
   let useDiscovery: () => { start: (params?: any) => void; isDiscovering: boolean; printers: any[] };
@@ -74,6 +77,7 @@ export default function ReceiptScreen() {
   const [template, setTemplate] = useState<PrintTemplateId>('classic');
   const [printerType, setPrinterType] = useState<'system' | 'pos'>('pos');
   const [showImage, setShowImage] = useState(false);
+  const [isPaid, setIsPaid] = useState(initialPaidStatus);
   const insets = useSafeAreaInsets();
 
   // Theme colors for dark mode support
@@ -102,6 +106,18 @@ export default function ReceiptScreen() {
         
         // Initialize database
         await initDatabase();
+        
+        // Load payment status from database if viewing existing receipt
+        if (isExistingReceipt && receiptId) {
+          try {
+            const receipt = await getReceiptById(receiptId);
+            if (receipt && receipt.is_paid !== undefined) {
+              setIsPaid(receipt.is_paid);
+            }
+          } catch (e) {
+            console.error('Error loading payment status:', e);
+          }
+        }
       } catch (e) {
         // ignore
       }
@@ -109,7 +125,7 @@ export default function ReceiptScreen() {
     loadPrefs();
     // Reset auto-print flag when receipt screen loads
     autoPrintAttemptedRef.current = false;
-  }, []);
+  }, [isExistingReceipt, receiptId]);
 
   // Start discovery for test printing to first printer - search for both Bluetooth and WiFi/LAN printers
   useEffect(() => {
@@ -287,7 +303,7 @@ export default function ReceiptScreen() {
         if (useManualTextPrint) {
           step = 'printing receipt manually as text';
           console.log(`[RECEIPT PRINT] Step: ${step}`);
-          await printReceiptAsText(printer, PrinterConstants, receiptData, filteredReceiptLines, orderNumber, shopName, template);
+          await printReceiptAsText(printer, PrinterConstants, receiptData, filteredReceiptLines, orderNumber, shopName, template, isPaid);
           console.log(`[RECEIPT PRINT] Receipt printed manually as text`);
         }
         
@@ -813,6 +829,17 @@ export default function ReceiptScreen() {
   const displayDateTime = formatDateTime();
   const customerInfo = receiptData?.customer;
   const hasCustomerInfo = !!(customerInfo && (customerInfo.name || customerInfo.phone));
+  const itemsTotal = useMemo(() => {
+    if (!receiptData) return 0;
+    return receiptData.items.reduce((sum, item) => {
+      const price = typeof item.price === 'number' ? item.price : 0;
+      return sum + price;
+    }, 0);
+  }, [receiptData]);
+  const totalMismatchThreshold = 0.05;
+  const mismatchDifference = receiptData ? itemsTotal - receiptData.total : 0;
+  const hasTotalMismatch = receiptData ? Math.abs(mismatchDifference) > totalMismatchThreshold : false;
+  const mismatchDifferenceDisplay = `${mismatchDifference >= 0 ? '+' : ''}${mismatchDifference.toFixed(2)}`;
 
   const formatReceiptText = (text: string) => {
     // Split text into lines and format as receipt
@@ -904,6 +931,20 @@ export default function ReceiptScreen() {
     return receiptLines;
   })();
 
+  useEffect(() => {
+    if (hasTotalMismatch && receiptData) {
+      if (!mismatchAlertShownRef.current) {
+        Alert.alert(
+          'Receipt Needs Attention',
+          `Items add up to $${itemsTotal.toFixed(2)}, but the receipt total is $${receiptData.total.toFixed(2)}.\n\nPlease re-check or retake the photo before printing.`
+        );
+        mismatchAlertShownRef.current = true;
+      }
+    } else {
+      mismatchAlertShownRef.current = false;
+    }
+  }, [hasTotalMismatch, receiptData, itemsTotal]);
+
   const handleSave = async (silent: boolean = false) => {
     if (isSaving || isSaved || isExistingReceipt) return;
     
@@ -925,6 +966,7 @@ export default function ReceiptScreen() {
         total_price: total,
         receipt_data: receiptDataJson,
         order_number: orderNumber || undefined,
+        is_paid: isPaid,
       });
       
       setIsSaved(true);
@@ -979,6 +1021,10 @@ export default function ReceiptScreen() {
       }
       try {
         const autoPrint = await getAutoPrinter();
+        if (hasTotalMismatch) {
+          console.warn('[AUTO PRINT] Skipped because items total does not match receipt total.');
+          return;
+        }
         // Wait for receipt data to be processed and saved before auto-printing
         if (autoPrint && isSaved && !isEpsonPrinting && (receiptData || (filteredReceiptLines && filteredReceiptLines.length > 0))) {
           autoPrintAttemptedRef.current = true;
@@ -997,11 +1043,11 @@ export default function ReceiptScreen() {
       }
     };
     // Only auto-print after receipt is saved and data is ready
-    if (isSaved && (receiptData || (filteredReceiptLines && filteredReceiptLines.length > 0))) {
+    if (!hasTotalMismatch && isSaved && (receiptData || (filteredReceiptLines && filteredReceiptLines.length > 0))) {
       autoPrintIfEnabled();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSaved, isExistingReceipt, isEpsonPrinting, receiptData, filteredReceiptLines]);
+  }, [isSaved, isExistingReceipt, isEpsonPrinting, receiptData, filteredReceiptLines, hasTotalMismatch]);
 
   const handlePrint = async () => {
     try {
@@ -1009,9 +1055,9 @@ export default function ReceiptScreen() {
       
       // Generate HTML for the receipt
       const html = isJson && receiptData 
-        ? generateReceiptHTMLFromJSON(receiptData, orderNumber)
+        ? generateReceiptHTMLFromJSON(receiptData, orderNumber, isPaid)
         : filteredReceiptLines 
-          ? generateReceiptHTML(filteredReceiptLines, orderNumber)
+          ? generateReceiptHTML(filteredReceiptLines, orderNumber, isPaid)
           : '<html><body>No receipt data available</body></html>';
       
       // Print the receipt
@@ -1056,7 +1102,7 @@ export default function ReceiptScreen() {
       .replace(/'/g, '&#039;');
   };
 
-  const generateReceiptHTMLFromJSON = (receiptData: ReceiptData, orderNum: string | null): string => {
+  const generateReceiptHTMLFromJSON = (receiptData: ReceiptData, orderNum: string | null, paid: boolean): string => {
     const dateTimeStr = formatDateTime();
     const totals = calculateTotals(receiptData.total);
     const customerDetails = receiptData.customer;
@@ -1218,6 +1264,11 @@ export default function ReceiptScreen() {
               </div>
               ${customerInfoHTML}
             </div>
+            <div style="margin: 8px 0; text-align: center;">
+              <span style="display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; ${paid ? 'background-color: #D1FAE5; color: #065F46;' : 'background-color: #FEE2E2; color: #991B1B;'}">
+                ${paid ? 'PAID' : 'Unpaid'}
+              </span>
+            </div>
             <div class="divider"></div>
           </div>
           
@@ -1246,7 +1297,7 @@ export default function ReceiptScreen() {
     isTotalLine: boolean;
     hasPrice: boolean;
     key: string;
-  }>, orderNum: string | null): string => {
+  }>, orderNum: string | null, paid: boolean): string => {
     const dateTimeStr = formatDateTime();
 
     const productLines = lines.filter(line => !line.isTotalLine);
@@ -1383,6 +1434,11 @@ export default function ReceiptScreen() {
             <div class="shop-name">${escapeHTML(shopName || 'Pappas Ocean Catch')}</div>
             ${orderNum ? `<div class="order-number">Order #: ${escapeHTML(orderNum)}</div>` : ''}
             <div class="date-time">${escapeHTML(dateTimeStr)}</div>
+            <div style="margin: 8px 0;">
+              <span style="display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; ${paid ? 'background-color: #D1FAE5; color: #065F46;' : 'background-color: #FEE2E2; color: #991B1B;'}">
+                ${paid ? 'PAID' : 'Unpaid'}
+              </span>
+            </div>
             <div class="divider"></div>
           </div>
           
@@ -1421,6 +1477,32 @@ export default function ReceiptScreen() {
         </TouchableOpacity>
         <ThemedText type="title" style={styles.title}>Receipt</ThemedText>
         <View style={styles.headerActions}>
+          <TouchableOpacity 
+            onPress={async () => {
+              const newPaidStatus = !isPaid;
+              const previousPaidStatus = isPaid;
+              setIsPaid(newPaidStatus);
+              // Update database if this is an existing receipt
+              if (isExistingReceipt && receiptId) {
+                try {
+                  await updateReceiptPaymentStatus(receiptId, newPaidStatus);
+                } catch (e) {
+                  console.error('Error updating payment status:', e);
+                  // Revert on error
+                  setIsPaid(previousPaidStatus);
+                  Alert.alert('Error', 'Failed to update payment status');
+                }
+              }
+            }} 
+            style={[styles.paidButton, { backgroundColor: (isPaid ? '#4CAF50' : '#DC2626') + '20' }]}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <IconSymbol 
+              name={isPaid ? "checkmark.circle.fill" : "xmark.circle.fill"} 
+              size={24} 
+              color={isPaid ? '#4CAF50' : '#DC2626'} 
+            />
+          </TouchableOpacity>
           <TouchableOpacity 
             onPress={() => handleSave(false)} 
             style={[styles.saveButton, { backgroundColor: (isSaved || isExistingReceipt ? '#4CAF50' : tintColor) + '20' }]}
@@ -1517,7 +1599,27 @@ export default function ReceiptScreen() {
               )}
             </View>
             <View style={[styles.divider, { backgroundColor: borderColor }]} />
+            {/* Payment Status */}
+            <View style={styles.paymentStatusContainer}>
+              <View style={[styles.paymentStatusBadge, { backgroundColor: isPaid ? '#D1FAE5' : '#FEE2E2' }]}>
+                <ThemedText style={[styles.paymentStatusText, { color: isPaid ? '#065F46' : '#991B1B' }]}>
+                  {isPaid ? 'PAID' : 'Unpaid'}
+                </ThemedText>
+              </View>
+            </View>
           </View>
+          {hasTotalMismatch && receiptData && (
+            <View style={[styles.warningBanner, { borderColor: '#F5C2C7', backgroundColor: '#FDECEA' }]}>
+              <IconSymbol name="exclamationmark.triangle.fill" size={18} color="#C53030" />
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.warningTitle}>Totals don’t match</ThemedText>
+                <ThemedText style={[styles.warningText, { color: '#822727' }]}>
+                  Items sum ${itemsTotal.toFixed(2)} vs receipt total ${receiptData.total.toFixed(2)} ({mismatchDifferenceDisplay}).
+                  Please double-check or retake the photo. Auto-print is paused.
+                </ThemedText>
+              </View>
+            </View>
+          )}
 
           <View style={styles.receiptBody}>
             {isJson && receiptData ? (
@@ -1806,6 +1908,14 @@ const styles = StyleSheet.create({
     gap: 8,
     alignItems: 'center',
   },
+  paidButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
   saveButton: {
     width: 40,
     height: 40,
@@ -1899,6 +2009,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 12,
   },
+  paymentStatusContainer: {
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  paymentStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  paymentStatusText: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
   orderCustomerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1930,6 +2055,24 @@ const styles = StyleSheet.create({
   customerPhone: {
     fontSize: 14,
     textAlign: 'right',
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  warningTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  warningText: {
+    fontSize: 12,
+    lineHeight: 18,
   },
   divider: {
     width: '100%',

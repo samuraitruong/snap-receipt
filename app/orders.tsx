@@ -3,7 +3,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useThemeColor } from '@/hooks/use-theme-color';
-import { getAvailableDates, getLocalDateString, getReceiptsByDate, initDatabase, type ReceiptRecord } from '@/utils/database';
+import { getAvailableDates, getLocalDateString, getReceiptsByDate, initDatabase, updateReceiptPaymentStatus, type ReceiptRecord } from '@/utils/database';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -104,6 +104,7 @@ export default function OrdersScreen() {
           extractedText: encodeURIComponent(data.extractedText || ''),
           extractedDataType: data.isJson ? 'json' : 'text',
           orderNumber: receipt.order_number || '',
+          receiptId: receipt.id?.toString() || '',
           isExistingReceipt: 'true',
         },
       });
@@ -270,9 +271,21 @@ export default function OrdersScreen() {
                 key={receipt.id}
                 receipt={receipt}
                 onPress={handleReceiptPress}
+                onTogglePaid={async (receiptId, isPaid) => {
+                  try {
+                    await updateReceiptPaymentStatus(receiptId, isPaid);
+                    // Reload receipts to reflect the change
+                    const data = await getReceiptsByDate(selectedDate);
+                    setReceipts(data);
+                  } catch (e) {
+                    console.error('Error updating payment status:', e);
+                    Alert.alert('Error', 'Failed to update payment status');
+                  }
+                }}
                 cardBackground={cardBackground}
                 borderColor={borderColor}
                 secondaryText={secondaryText}
+                tintColor={tintColor}
               />
             ))}
           </View>

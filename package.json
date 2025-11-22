@@ -15,6 +15,9 @@
     "build:android:local:release": "npx expo export --platform android && npx expo prebuild --platform android && cd android && ./gradlew assembleRelease && cd ..",
     "build:ios": "eas build --platform ios --profile preview",
     "build:ios:prod": "eas build --platform ios --profile production",
+    "build:ios:local": "npx expo export --platform ios && npx expo prebuild --platform ios && cd ios && xcodebuild -workspace SnapReceipt.xcworkspace -scheme SnapReceipt -configuration Debug -sdk iphonesimulator -derivedDataPath build && cd ..",
+    "build:ios:local:device": "npx expo export --platform ios && npx expo prebuild --platform ios && cd ios && xcodebuild -workspace SnapReceipt.xcworkspace -scheme SnapReceipt -configuration Debug -sdk iphoneos -derivedDataPath build CODE_SIGN_IDENTITY=\"\" CODE_SIGNING_REQUIRED=NO && cd ..",
+    "build:ios:local:release": "npx expo export --platform ios && npx expo prebuild --platform ios && cd ios && xcodebuild -workspace SnapReceipt.xcworkspace -scheme SnapReceipt -configuration Release -sdk iphoneos -derivedDataPath build && cd ..",
     "build:all": "eas build --platform all --profile preview"
   },
   "dependencies": {

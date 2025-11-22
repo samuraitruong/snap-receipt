@@ -96,7 +96,8 @@ export async function printReceiptAsText(
   filteredReceiptLines: ReceiptLine[] | null,
   orderNumber: string | null,
   shopName: string,
-  template: PrintTemplateId = 'classic'
+  template: PrintTemplateId = 'classic',
+  isPaid: boolean = false
 ): Promise<void> {
   const settings = getTemplateSettings(template);
   const lineWidth = settings.lineWidth;
@@ -141,6 +142,10 @@ export async function printReceiptAsText(
     }
 
     await printer.addText(formatColumns(dateTimeStr, customerPhoneText || undefined));
+    
+    // Print payment status
+    const paymentStatusText = isPaid ? 'PAID' : 'Unpaid';
+    await printer.addText(formatColumns('', paymentStatusText));
     
     await printer.addFeedLine(settings.feedLinesAfterItems);
 

@@ -124,7 +124,8 @@ CRITICAL EXTRACTION RULES - STRICT PARSING ONLY:
    - If no quantity is shown, assume quantity is 1
    - Extract the product name EXACTLY as it appears in the receipt (without quantity prefix)
    - DO NOT modify product names or add information that is not visible
-   - Extract the price as a numeric value (without $ sign, e.g., "10.99" not "$10.99")
+   - Extract the price shown on the line EXACTLY as printed (this is the line total, already including quantity when quantity is shown)
+   - NEVER attempt to calculate or divide a unit price—just copy the printed line amount
    - If the same product name appears multiple times with different modifiers or prices, each is a SEPARATE item
    - Example: If you see "Burger" with "no onions" and "$10.00", and "Burger" with "extra cheese" and "$12.00", list them as two separate items
    - IMPORTANT: Only extract what you see - do not add or modify anything
@@ -134,20 +135,33 @@ CRITICAL EXTRACTION RULES - STRICT PARSING ONLY:
    - DO NOT add modifiers that are not visible in the receipt
    - DO NOT infer or assume modifiers based on product names
    - DO NOT add modifiers just because a product might commonly have them
-   - If a product has modifiers visible in the receipt (like "no onions", "extra cheese", "add bacon"), extract them as an array
+   - Modifiers can appear in different formats:
+     * On the same line as the product (e.g., "Burger - no onions")
+     * On a separate line below the product (e.g., "Family Pack"  with "2 X Grilled Flake" below it)
+     * Indented or visually associated with the product above
+   - IMPORTANT: If text appears below a product item WITHOUT its own price, it is likely a modifier of that product
+   - Quantity-based modifiers (like "2x Grilled Flake", "2 X Grilled Flake", "3x Large") should be extracted as-is, including the quantity
    - Modifiers should be text-only (no prices, no dollar amounts)
    - The price belongs to the main product, NOT to individual modifiers
    - If a product has NO modifiers visible in the receipt image, you MUST omit the modifiers field completely (do not include an empty array)
    - Only include modifiers if they are clearly written/printed on the receipt
+   - Distinguish modifiers from separate items: If text has its own price on the same line, it's a separate item, not a modifier
 
-5. Customer Information (OPTIONAL):
+5. Menu Accuracy & Validation:
+   - Some POS layouts show reference menus or modifiers on side panels—IGNORE these unless they are clearly part of the purchased items list.
+   - NEVER invent random menu entries; only capture lines that belong to the actual purchased items.
+   - After extracting all items, calculate the sum of the item prices (each price already includes its quantity).
+   - That calculated sum MUST match the Total amount identified in section 2 (allow a tolerance of ±$0.01 for rounding).
+   - If the numbers do not match, re-check the items and fix mistakes before returning the JSON.
+
+6. Customer Information (OPTIONAL):
    - If the receipt clearly shows a customer name and/or phone number (e.g., loyalty info), capture it.
    - Only record details that are explicitly printed on the receipt (e.g., "Customer: Jane Doe", "Phone: 0400 123 456").
    - Do NOT invent or infer customer details that are not visible.
    - Return customer info under a "customer" object with "name" and/or "phone" keys.
    - If only one field is present, include just that field. If no customer info exists, omit the "customer" object entirely.
 
-6. Return Format:
+7. Return Format:
    - Return ONLY valid JSON, no explanations or comments
    - Use this exact structure:
      {
@@ -187,6 +201,12 @@ Example JSON output (only include modifiers if they are visible in the receipt, 
       "modifiers": ["Add bacon", "Extra cheese"]
     },
     {
+      "name": "Family Flake Pack",
+      "quantity": 1,
+      "price": 55.20,
+      "modifiers": ["2 X Grilled Flake"]
+    },
+    {
       "name": "FRIES",
       "quantity": 3,
       "price": 15.50
@@ -200,6 +220,7 @@ Example JSON output (only include modifiers if they are visible in the receipt, 
 }
 
 Note: In the example above, modifiers are only shown IF they are visible in the receipt. If FRIES had no modifiers visible, do not add any modifiers field for it.
+Note: The "Family Flake Pack" example shows how to handle modifiers that appear on separate lines below the main item (like "2 X Grilled Flake"). These should be extracted as modifiers, not as separate items.
 
 KEY POINTS:
 - Extract the Total from the TOP of the receipt (it's the final total price)
@@ -207,12 +228,15 @@ KEY POINTS:
 - Extract quantity as a number (1 if not shown)
 - Extract price as a number without $ sign
 - CRITICAL: Only extract modifiers that are ACTUALLY VISIBLE in the receipt image
+- CRITICAL: Pay special attention to text that appears below a product item - if it has no price, it's likely a modifier
+- CRITICAL: Quantity-based modifiers (like "2x Grilled Flake", "2 X Grilled Flake") should be captured as modifiers, not separate items
 - DO NOT add modifiers that are not in the receipt - if you don't see them, don't include them
 - If a product has no visible modifiers, omit the modifiers field completely
 - Each product with different modifiers or price is a separate item
 - Return ONLY the JSON, no other text
 - Be strict: only parse what you see, don't add anything
 - Customer info is optional; include it ONLY when name and/or phone are clearly printed
+- Verify that the sum of item prices equals the receipt total before responding
 
 JSON response:`;
 

@@ -30,6 +30,7 @@ export default function CaptureScreen() {
   const [zoom, setZoom] = useState(0.75); // Default to 0.75 (normalized 0-1 value)
   const [multiPageMode, setMultiPageMode] = useState(false);
   const [capturedImages, setCapturedImages] = useState<Array<{ base64: string; uri?: string }>>([]);
+  const [isPaid, setIsPaid] = useState(false); // Default to unpaid
   const cameraRef = useRef<CameraView>(null);
 
   // Load current order number, camera zoom, and multi-page mode on mount
@@ -273,6 +274,7 @@ export default function CaptureScreen() {
           extractedText: encodeURIComponent(extractedDataString || 'No text extracted'),
           extractedDataType: ocrMode === 'generative' ? 'json' : 'text',
           orderNumber: orderNumber.toString(),
+          isPaid: isPaid ? 'true' : 'false',
         },
       });
     } catch (error: any) {
@@ -293,6 +295,7 @@ export default function CaptureScreen() {
           imageUri: imageUri ? encodeURIComponent(imageUri) : '',
           extractedText: encodeURIComponent('Failed to extract text: ' + errorMessage),
           orderNumber: orderNumber.toString(),
+          isPaid: isPaid ? 'true' : 'false',
         },
       });
     } finally {
@@ -340,6 +343,7 @@ export default function CaptureScreen() {
           extractedText: encodeURIComponent(extractedDataString || 'No text extracted'),
           extractedDataType: ocrMode === 'generative' ? 'json' : 'text',
           orderNumber: orderNumber.toString(),
+          isPaid: isPaid ? 'true' : 'false',
         },
       });
     } catch (error: any) {
@@ -361,6 +365,7 @@ export default function CaptureScreen() {
           imageUri: firstImageUri ? encodeURIComponent(firstImageUri) : '',
           extractedText: encodeURIComponent('Failed to extract text: ' + errorMessage),
           orderNumber: orderNumber.toString(),
+          isPaid: isPaid ? 'true' : 'false',
         },
       });
     } finally {
@@ -446,6 +451,7 @@ export default function CaptureScreen() {
           imageUri: encodeURIComponent(imageUri), 
           extractedText: encodeURIComponent('Failed to process image: ' + errorMessage),
           orderNumber: orderNumber.toString(),
+          isPaid: isPaid ? 'true' : 'false',
         },
       });
       setProcessing(false);
@@ -475,6 +481,24 @@ export default function CaptureScreen() {
         zoom={getActualZoom(zoom)}
       >
         <View style={styles.overlay}>
+          {/* Payment Status Toggle - Center */}
+          <View style={styles.centerControls} pointerEvents="box-none">
+            <TouchableOpacity
+              onPress={() => setIsPaid(!isPaid)}
+              style={[styles.paidToggleButton, { backgroundColor: (isPaid ? '#4CAF50' : '#DC2626') + 'CC' }]}
+              activeOpacity={0.8}
+            >
+              <IconSymbol 
+                name={isPaid ? "checkmark.circle.fill" : "xmark.circle.fill"} 
+                size={24} 
+                color="#fff" 
+              />
+              <ThemedText style={styles.paidToggleText}>
+                {isPaid ? 'PAID' : 'Unpaid'}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+
           {/* Scan Frame at Top */}
           <View style={styles.scanFrameContainer}>
             <View style={styles.scanFrame}>
@@ -818,6 +842,35 @@ const styles = StyleSheet.create({
   message: {
     textAlign: 'center',
     paddingBottom: 10,
+  },
+  centerControls: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  paidToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  paidToggleText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 });
 
